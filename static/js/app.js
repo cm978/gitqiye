@@ -8,10 +8,15 @@
   volume: 50,
   playing: false,
   particleScene: null,
+  demoMode: true,
+  handSignal: null,
+  gestureRuleState: window.GestureRules ? window.GestureRules.createGestureRuleState() : null,
+  pendingDemoGesture: null,
   demoOverrideUntil: 0,
   handTracker: null,
   handTrackingBusy: false,
   lastHandSignature: null,
+  lastHandCenter: null,
 };
 
 const camera = document.getElementById("camera");
@@ -39,6 +44,7 @@ async function loadStatus() {
   const status = await response.json();
   state.labels = status.labels;
   state.mappings = status.mappings;
+  state.demoMode = status.demo_mode;
   modelModePill.textContent = status.demo_mode ? "Demo Mode" : "Model Ready";
   devicePill.textContent = status.device.toUpperCase();
   collectLabel.innerHTML = status.labels.map((label) => `<option value="${label}">${label}</option>`).join("");
@@ -85,17 +91,27 @@ function initHandTracking() {
     minTrackingConfidence: 0.55,
   });
   state.handTracker.onResults((results) => {
-    if (state.mode !== "particles" || !state.particleScene) return;
     const hands = results.multiHandLandmarks || [];
     if (!hands.length) {
-      state.particleScene.updateHands(null);
+      state.handSignal = null;
+      if (state.mode === "particles" && state.particleScene) state.particleScene.updateHands(null);
       return;
     }
     const opennessValues = hands.map(computeHandOpenness);
     const openness = opennessValues.reduce((sum, value) => sum + value, 0) / opennessValues.length;
+    const center = computeHandsCenter(hands);
+    const pinch = computeHandPinch(hands);
+    const velocity = computeHandVelocity(center);
     const signature = hands.flatMap((hand) => [hand[0].x, hand[0].y, hand[9].x, hand[9].y]).join(",");
     const motion = computeHandMotion(signature);
-    state.particleScene.updateHands({ openness, motion, hands: hands.length });
+    state.handSignal = { hasHands: true, hands: hands.length, center, openness, pinch, motion, velocity };
+    if (state.demoMode && window.GestureRules && state.gestureRuleState) {
+      const liveGesture = window.GestureRules.classifyDemoGesture(state.handSignal, state.gestureRuleState);
+      if (liveGesture) state.pendingDemoGesture = liveGesture;
+    }
+    if (state.mode === "particles" && state.particleScene) {
+      state.particleScene.updateHands(state.handSignal);
+    }
     particleState.textContent = hands.length > 1 ? "双手交互" : "手势交互";
   });
   requestAnimationFrame(handTrackingLoop);
@@ -123,17 +139,54 @@ function computeHandMotion(signature) {
   return Math.max(0, Math.min(1, motion * 18));
 }
 
+function computeHandVelocity(center) {
+  const previous = state.lastHandCenter;
+  state.lastHandCenter = { x: center.x, y: center.y };
+  if (!previous) return { x: 0, y: 0 };
+  return {
+    x: Math.max(-1, Math.min(1, (center.x - previous.x) * 18)),
+    y: Math.max(-1, Math.min(1, (center.y - previous.y) * 18)),
+  };
+}
+
+function computeHandPinch(hands) {
+  const values = hands.map((hand) => {
+    const thumb = hand[4];
+    const index = hand[8];
+    const wrist = hand[0];
+    const middleBase = hand[9];
+    const palmSize = Math.hypot(wrist.x - middleBase.x, wrist.y - middleBase.y) || 0.08;
+    const distance = Math.hypot(thumb.x - index.x, thumb.y - index.y);
+    return Math.max(0, Math.min(1, 1 - distance / (palmSize * 1.45)));
+  });
+  return values.reduce((sum, value) => sum + value, 0) / Math.max(values.length, 1);
+}
+
+function computeHandsCenter(hands) {
+  const points = hands.flatMap((hand) => hand);
+  const total = points.reduce((sum, point) => ({
+    x: sum.x + point.x,
+    y: sum.y + point.y,
+  }), { x: 0, y: 0 });
+  return {
+    x: total.x / points.length,
+    y: total.y / points.length,
+  };
+}
+
 async function handTrackingLoop() {
-  if (state.handTracker && state.stream && camera.readyState >= 2 && state.mode === "particles" && !state.handTrackingBusy) {
+  if (state.handTracker && state.stream && camera.readyState >= 2 && !state.handTrackingBusy) {
     state.handTrackingBusy = true;
     try {
       await state.handTracker.send({ image: camera });
     } catch (error) {
+      state.handSignal = null;
       if (state.particleScene) state.particleScene.updateHands(null);
     } finally {
       state.handTrackingBusy = false;
     }
   } else if (state.mode === "particles" && state.particleScene) {
+    state.handSignal = null;
     state.particleScene.updateHands(null);
   }
   requestAnimationFrame(handTrackingLoop);
@@ -156,10 +209,14 @@ async function predictLoop() {
 }
 
 async function predict() {
+  const demoGesture = state.demoMode ? state.pendingDemoGesture : null;
+  state.pendingDemoGesture = null;
+  const body = { frames: state.frames, mode: state.mode };
+  if (demoGesture) body.demo_gesture = demoGesture;
   const response = await fetch("/api/predict", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ frames: state.frames, mode: state.mode }),
+    body: JSON.stringify(body),
   });
   const result = await response.json();
   if (result.error) return;
@@ -249,13 +306,25 @@ document.querySelectorAll(".gesture-demo-btn").forEach((button) => {
     if (!state.particleScene) return;
     state.demoOverrideUntil = Date.now() + 1800;
     state.particleScene.applyGesture(gesture, 0.96, true);
-    gestureName.textContent = gesture === "open_palm" ? "张开手掌" : "握拳";
+    gestureName.textContent = gesture;
     confidence.textContent = "96%";
     triggerState.textContent = "已触发";
     particleConfidence.textContent = "96%";
-    particleState.textContent = gesture === "open_palm" ? "放大" : "缩小";
+    particleState.textContent = getParticleDemoState(gesture);
   });
 });
+
+function getParticleDemoState(gesture) {
+  return {
+    swipe_left: "左旋",
+    swipe_right: "右旋",
+    swipe_up: "上扬",
+    swipe_down: "下落",
+    click: "换色",
+    zoom_in: "扩散",
+    zoom_out: "聚拢",
+  }[gesture] || "已触发";
+}
 
 document.querySelectorAll(".nav-item").forEach((button) => {
   button.addEventListener("click", () => {

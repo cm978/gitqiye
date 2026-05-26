@@ -1,6 +1,5 @@
 import base64
 import io
-import random
 import time
 from collections import deque
 from pathlib import Path
@@ -62,11 +61,11 @@ class GesturePredictor:
             self.model.load_state_dict(state["model"] if isinstance(state, dict) and "model" in state else state)
             self.model.eval()
 
-    def predict(self, frames, mode="web"):
+    def predict(self, frames, mode="web", demo_gesture=None):
         started = time.perf_counter()
         if self.demo_mode:
-            label = self._next_demo_label()
-            confidence = round(random.uniform(0.72, 0.96), 4)
+            label = demo_gesture if demo_gesture in self.labels else "no_gesture"
+            confidence = 0.96 if label != "no_gesture" else 1.0
         else:
             label, confidence = self._predict_with_model(frames)
         action = GESTURE_TO_ACTIONS.get(mode, GESTURE_TO_ACTIONS["web"]).get(label, "保持当前状态")
@@ -94,12 +93,6 @@ class GesturePredictor:
             probs = torch.softmax(logits, dim=1)[0]
             confidence, index = torch.max(probs, dim=0)
         return self.labels[index.item()], round(confidence.item(), 4)
-
-    def _next_demo_label(self):
-        demo_labels = ["swipe_left", "swipe_left", "swipe_right", "swipe_right", "swipe_up", "swipe_up", "swipe_down", "swipe_down", "click", "click", "zoom_in", "zoom_in", "zoom_out", "zoom_out"]
-        label = demo_labels[self.demo_index % len(demo_labels)]
-        self.demo_index += 1
-        return label
 
     def _is_stable(self, label, confidence):
         if confidence < self.model_config["confidence_threshold"] or label == "no_gesture":

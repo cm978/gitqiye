@@ -13,6 +13,10 @@ class ParticleScene {
     this.targetCameraZ = 132;
     this.paletteShift = 0;
     this.rotationBoost = { x: 0, y: 0 };
+    this.handDrift = { x: 0, y: 0 };
+    this.fanForce = { x: 0, y: 0 };
+    this.followTarget = { x: 0, y: 0 };
+    this.verticalFlow = 0;
     this.palette = [
       new THREE.Color("#38f7ff"),
       new THREE.Color("#7b61ff"),
@@ -255,11 +259,21 @@ class ParticleScene {
     }
     this.lastHandAt = Date.now();
     this.autoShow = false;
+    const center = handData.center || { x: 0.5, y: 0.5 };
+    const velocity = handData.velocity || { x: 0, y: 0 };
     const openness = this.clamp(handData.openness || 0, 0, 1);
+    const pinch = this.clamp(handData.pinch || 0, 0, 1);
     const motion = this.clamp(handData.motion || 0, 0, 1);
     const hands = handData.hands || 1;
-    this.scale = 0.82 + openness * 0.78 + (hands > 1 ? 0.16 : 0);
-    this.spread = 0.08 + openness * 0.62 + motion * 0.45;
+    this.handDrift.x += ((center.x - 0.5) * 2 - this.handDrift.x) * 0.18;
+    this.handDrift.y += ((center.y - 0.5) * 2 - this.handDrift.y) * 0.18;
+    this.fanForce.x += (this.clamp(velocity.x * 3.8, -1, 1) - this.fanForce.x) * 0.22;
+    this.fanForce.y += (this.clamp(velocity.y * 3.8, -1, 1) - this.fanForce.y) * 0.22;
+    this.followTarget.x = (center.x - 0.5) * 52;
+    this.followTarget.y = (0.5 - center.y) * 34;
+    this.verticalFlow += ((this.handDrift.y * 8) + (this.fanForce.y * 22) - this.verticalFlow) * 0.12;
+    this.scale = 0.82 + openness * 0.78 - pinch * 0.22 + (hands > 1 ? 0.16 : 0);
+    this.spread = Math.max(0.04, 0.08 + openness * 0.62 + motion * 0.45 - pinch * 0.16);
     this.turbulence = 0.10 + motion * 1.2 + openness * 0.45;
     this.targetCameraZ = 148 - openness * 54;
   }
@@ -290,6 +304,13 @@ class ParticleScene {
       this.spread += (0.18 + Math.sin(this.time * 0.7) * 0.06 - this.spread) * 0.03;
       this.turbulence += (0.22 - this.turbulence) * 0.035;
       this.targetCameraZ = 132;
+      this.handDrift.x *= 0.94;
+      this.handDrift.y *= 0.94;
+      this.fanForce.x *= 0.9;
+      this.fanForce.y *= 0.9;
+      this.followTarget.x *= 0.92;
+      this.followTarget.y *= 0.92;
+      this.verticalFlow *= 0.94;
     }
     this.cameraZ += (this.targetCameraZ - this.cameraZ) * 0.08;
     this.camera.position.z = this.cameraZ;
@@ -297,8 +318,10 @@ class ParticleScene {
     this.updateParticlePositions();
     this.material.uniforms.uTime.value = this.time;
     this.material.uniforms.uEnergy.value = this.clamp(this.turbulence, 0.08, 1.4);
-    this.group.rotation.y += (this.autoShow ? 0.0028 : 0.0012) + this.rotationBoost.y;
-    this.group.rotation.x += 0.0008 + this.rotationBoost.x;
+    this.group.position.x += (this.followTarget.x - this.group.position.x) * 0.12;
+    this.group.position.y += (this.followTarget.y - this.group.position.y) * 0.12;
+    this.group.rotation.y += (this.autoShow ? 0.0028 : 0.0012) + this.rotationBoost.y + this.handDrift.x * 0.0035 + this.fanForce.x * 0.018;
+    this.group.rotation.x += 0.0008 + this.rotationBoost.x - this.handDrift.y * 0.0025 - this.fanForce.y * 0.012;
     if (this.mode === "saturn") this.group.rotation.z = -0.18;
     this.starField.rotation.y -= 0.00042;
     this.rotationBoost.x *= 0.90;
@@ -319,7 +342,7 @@ class ParticleScene {
       const noise = Math.sin(this.time * 2.8 + seed) * this.turbulence;
       const breathing = Math.sin(this.time * 1.4 + seed * 0.3) * this.spread;
       const tx = this.targetPositions[j] * this.scale + this.randomOffsets[j] * (14 * this.spread + noise);
-      const ty = this.targetPositions[j + 1] * this.scale + this.randomOffsets[j + 1] * (14 * this.spread + breathing);
+      const ty = this.targetPositions[j + 1] * this.scale + this.randomOffsets[j + 1] * (14 * this.spread + breathing) + this.verticalFlow;
       const tz = this.targetPositions[j + 2] * this.scale + this.randomOffsets[j + 2] * (18 * this.spread + noise);
       pos[j] += (tx - pos[j]) * speed;
       pos[j + 1] += (ty - pos[j + 1]) * speed;

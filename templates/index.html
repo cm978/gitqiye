@@ -191,14 +191,20 @@
       <button class="preset-btn" data-preset="saturn" type="button">土星</button>
       <button class="preset-btn" data-preset="lotus" type="button">莲花</button>
       <div class="preset-group-title">演示手势</div>
-      <button class="gesture-demo-btn" data-gesture="open_palm" type="button">张开手掌</button>
-      <button class="gesture-demo-btn" data-gesture="fist" type="button">握拳</button>
+      <button class="gesture-demo-btn" data-gesture="swipe_left" type="button">左滑</button>
+      <button class="gesture-demo-btn" data-gesture="swipe_right" type="button">右滑</button>
+      <button class="gesture-demo-btn" data-gesture="swipe_up" type="button">上滑</button>
+      <button class="gesture-demo-btn" data-gesture="swipe_down" type="button">下滑</button>
+      <button class="gesture-demo-btn" data-gesture="click" type="button">点击</button>
+      <button class="gesture-demo-btn" data-gesture="zoom_in" type="button">张开/扩散</button>
+      <button class="gesture-demo-btn" data-gesture="zoom_out" type="button">握拳/聚拢</button>
     </section>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-  <script src="{{ url_for('static', filename='js/particles.js', v='33') }}"></script>
-  <script src="{{ url_for('static', filename='js/app.js', v='29') }}"></script>
+  <script src="{{ url_for('static', filename='js/gesture_rules.js', v='4') }}"></script>
+  <script src="{{ url_for('static', filename='js/particles.js', v='36') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js', v='33') }}"></script>
 </body>
 </html>
