@@ -4,28 +4,40 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>动态手势识别与虚拟交互系统</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css', v='15') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css', v='16') }}">
 </head>
 <body>
   <main class="app-shell">
-    <canvas id="particleCanvas"></canvas>
+    <canvas id="particleCanvas" aria-hidden="true"></canvas>
 
-    <aside class="sidebar">
-      <div class="brand">
-        <span class="brand-mark"></span>
-        <div>
-          <h1>GestureLab</h1>
-          <p>动态手势交互系统</p>
-        </div>
-      </div>
+    <aside class="sidebar" aria-label="主导航">
+      <a class="brand" href="#" aria-label="GestureLab">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-copy">
+          <strong>GestureLab</strong>
+          <small>Dynamic Gesture Console</small>
+        </span>
+      </a>
 
-      <nav class="primary-nav" aria-label="主导航">
-        <button class="nav-item active" data-view="recognition" data-mode="web">实时识别</button>
-        <button class="nav-item" data-view="web" data-mode="web">网页控制</button>
-        <button class="nav-item" data-view="media" data-mode="media">媒体控制</button>
-        <button class="nav-item" data-view="particles" data-mode="particles">粒子交互</button>
-        <button class="nav-item" data-view="collect" data-mode="web">数据采集</button>
-        <button class="nav-item" data-view="logs" data-mode="web">系统日志</button>
+      <nav class="primary-nav">
+        <button class="nav-item active" data-view="recognition" data-mode="web" data-title="实时识别中心">
+          <span>识别</span><em>Live</em>
+        </button>
+        <button class="nav-item" data-view="web" data-mode="web" data-title="网页控制">
+          <span>网页</span><em>Web</em>
+        </button>
+        <button class="nav-item" data-view="media" data-mode="media" data-title="媒体控制">
+          <span>媒体</span><em>Media</em>
+        </button>
+        <button class="nav-item" data-view="particles" data-mode="particles" data-title="粒子交互">
+          <span>粒子</span><em>3D</em>
+        </button>
+        <button class="nav-item" data-view="collect" data-mode="web" data-title="自定义数据采集">
+          <span>采集</span><em>Data</em>
+        </button>
+        <button class="nav-item" data-view="logs" data-mode="web" data-title="识别历史">
+          <span>历史</span><em>Log</em>
+        </button>
       </nav>
 
       <div class="sidebar-status">
@@ -35,86 +47,92 @@
       </div>
     </aside>
 
-    <section class="topbar">
-      <div>
-        <span class="eyebrow">RESNET50-LSTM / FLASK / PYTORCH</span>
-        <h2 id="pageTitle">实时识别中心</h2>
+    <header class="topbar">
+      <div class="page-heading">
+        <span class="eyebrow">ResNet50-LSTM / MediaPipe ROI / Flask</span>
+        <h1 id="pageTitle">实时识别中心</h1>
       </div>
-      <div class="top-actions">
-        <button id="startCamera">打开摄像头</button>
-        <button id="stopCamera" class="ghost-btn">关闭摄像头</button>
+      <div class="top-actions" aria-label="摄像头控制">
+        <button id="startCamera" class="primary-action" type="button">打开摄像头</button>
+        <button id="stopCamera" class="quiet-action" type="button">关闭摄像头</button>
       </div>
-    </section>
+    </header>
 
     <section class="content-area">
       <section id="recognitionView" class="view-panel active-view-panel">
-        <div class="recognition-grid">
-          <section class="panel camera-panel">
+        <div class="recognition-layout">
+          <section class="camera-panel surface">
             <div class="panel-head">
-              <span class="eyebrow">LIVE INPUT</span>
-              <h3>摄像头输入</h3>
+              <span class="eyebrow">Live Input</span>
+              <h2>摄像头输入</h2>
             </div>
             <div class="camera-stage">
               <video id="camera" autoplay playsinline muted></video>
               <div class="camera-placeholder">Camera</div>
-              <div class="scan-frame"></div>
+              <div class="scan-frame" aria-hidden="true"></div>
               <canvas id="captureCanvas" width="224" height="224" hidden></canvas>
             </div>
           </section>
 
-          <section class="panel gesture-panel">
-            <span class="eyebrow">CURRENT GESTURE</span>
+          <section class="gesture-panel surface">
+            <span class="eyebrow">Current Gesture</span>
             <strong id="gestureName">等待识别</strong>
             <div class="metric-row">
               <div><em id="confidence">0%</em><small>置信度</small></div>
               <div><em id="triggerState">待机</em><small>触发状态</small></div>
             </div>
-            <p id="actionName">未触发</p>
+            <p id="actionName">当前动作未触发</p>
           </section>
 
-          <section class="panel">
-            <span class="eyebrow">MODEL</span>
-            <h3>模型状态</h3>
+          <section class="model-panel surface">
+            <span class="eyebrow">Model</span>
+            <h2>模型状态</h2>
             <dl id="modelStatus" class="status-list"></dl>
           </section>
 
-          <section class="panel">
-            <span class="eyebrow">MAPPING</span>
-            <h3>手势映射</h3>
+          <section class="mapping-panel surface">
+            <span class="eyebrow">Mapping</span>
+            <h2>手势映射</h2>
             <div id="mappingList" class="mapping-list"></div>
           </section>
         </div>
       </section>
 
       <section id="webView" class="view-panel">
-        <div class="panel stage-card">
-          <span class="eyebrow">WEB CONTROL</span>
-          <h3>网页控制</h3>
+        <div class="module-stage surface">
+          <div class="module-copy">
+            <span class="eyebrow">Web Control</span>
+            <h2>网页控制</h2>
+            <p>用动态手势完成页面切换、滚动和确认操作。</p>
+          </div>
           <div id="webMode" class="mode-view active-view">
             <div class="slides" id="slides">
               <article class="slide active">
                 <span id="pageIndex">1 / 4</span>
-                <h4>网页控制</h4>
-                <p>左滑 / 右滑切换内容，上滑 / 下滑控制滚动，点击用于确认。</p>
+                <h3>内容切换</h3>
+                <p>左滑和右滑切换内容，上滑和下滑控制滚动，点击用于确认。</p>
               </article>
-              <article class="slide"><span>2 / 4</span><h4>交互卡片</h4><p>识别结果稳定后才会触发动作，减少误触。</p></article>
-              <article class="slide"><span>3 / 4</span><h4>模式映射</h4><p>同一个手势可以在不同模式下执行不同操作。</p></article>
-              <article class="slide"><span>4 / 4</span><h4>模型接入</h4><p>训练权重放入 checkpoints 后，系统会从 Demo 切换为真实推理。</p></article>
+              <article class="slide"><span>2 / 4</span><h3>稳定触发</h3><p>识别结果稳定后再执行动作，减少误触发。</p></article>
+              <article class="slide"><span>3 / 4</span><h3>模式映射</h3><p>同一组手势在网页、媒体和粒子模式中可以执行不同操作。</p></article>
+              <article class="slide"><span>4 / 4</span><h3>权重接入</h3><p>训练权重放入指定目录后，系统会从 Demo 切换为真实推理。</p></article>
             </div>
           </div>
         </div>
       </section>
 
       <section id="mediaView" class="view-panel">
-        <div class="panel stage-card">
-          <span class="eyebrow">MEDIA CONTROL</span>
-          <h3>媒体控制</h3>
+        <div class="module-stage surface media-stage">
+          <div class="module-copy">
+            <span class="eyebrow">Media Control</span>
+            <h2>媒体控制</h2>
+            <p>左右切歌，上下调节音量，点击切换播放状态。</p>
+          </div>
           <div id="mediaMode" class="mode-view">
             <div class="player">
               <div class="album-art"><div class="pulse-disc"></div></div>
               <div class="player-meta">
-                <span>MEDIA CONTROL</span>
-                <h4 id="trackName">Gesture Track 01</h4>
+                <span>Gesture Track</span>
+                <h3 id="trackName">Gesture Track 01</h3>
                 <p id="playerState">暂停</p>
                 <div class="volume"><span>音量</span><progress id="volumeBar" max="100" value="50"></progress></div>
               </div>
@@ -128,12 +146,15 @@
       </section>
 
       <section id="collectView" class="view-panel">
-        <div class="panel">
-          <span class="eyebrow">DATA COLLECTION</span>
-          <h3>自定义数据采集</h3>
+        <div class="module-stage surface">
+          <div class="module-copy">
+            <span class="eyebrow">Data Collection</span>
+            <h2>自定义数据采集</h2>
+            <p>为后续微调动态手势模型保存短序列样本。</p>
+          </div>
           <div class="collect-controls">
-            <select id="collectLabel"></select>
-            <button id="collectSample">录制样本</button>
+            <select id="collectLabel" aria-label="采集类别"></select>
+            <button id="collectSample" class="primary-action" type="button">录制样本</button>
           </div>
           <p id="collectState">选择类别后录制 2 秒样本。</p>
           <div id="sampleCounts" class="sample-counts"></div>
@@ -141,38 +162,43 @@
       </section>
 
       <section id="logsView" class="view-panel">
-        <div class="panel">
-          <span class="eyebrow">EVENT LOG</span>
-          <h3>识别历史</h3>
-          <table>
-            <thead><tr><th>时间</th><th>手势</th><th>置信度</th><th>模式</th><th>动作</th></tr></thead>
-            <tbody id="historyBody"></tbody>
-          </table>
+        <div class="module-stage surface">
+          <div class="module-copy">
+            <span class="eyebrow">Event Log</span>
+            <h2>识别历史</h2>
+            <p>最近识别结果会保存在这里，方便观察模型稳定性。</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>时间</th><th>手势</th><th>置信度</th><th>模式</th><th>动作</th></tr></thead>
+              <tbody id="historyBody"></tbody>
+            </table>
+          </div>
         </div>
       </section>
     </section>
 
-    <section class="particle-hud">
+    <section class="particle-hud" aria-label="粒子交互状态">
       <div><em id="particleConfidence">0%</em><small>置信度</small></div>
       <div><em id="particleState">待机</em><small>状态</small></div>
     </section>
 
     <section class="particle-presets" aria-label="粒子模型选择">
       <div class="preset-group-title">粒子预设</div>
-      <button class="preset-btn active" data-preset="nebula">星云</button>
-      <button class="preset-btn" data-preset="galaxy">星系</button>
-      <button class="preset-btn" data-preset="heart">爱心</button>
-      <button class="preset-btn" data-preset="saturn">土星</button>
-      <button class="preset-btn" data-preset="lotus">莲花</button>
+      <button class="preset-btn active" data-preset="nebula" type="button">星云</button>
+      <button class="preset-btn" data-preset="galaxy" type="button">星系</button>
+      <button class="preset-btn" data-preset="heart" type="button">爱心</button>
+      <button class="preset-btn" data-preset="saturn" type="button">土星</button>
+      <button class="preset-btn" data-preset="lotus" type="button">莲花</button>
       <div class="preset-group-title">演示手势</div>
-      <button class="gesture-demo-btn" data-gesture="open_palm">张开手掌</button>
-      <button class="gesture-demo-btn" data-gesture="fist">握拳</button>
+      <button class="gesture-demo-btn" data-gesture="open_palm" type="button">张开手掌</button>
+      <button class="gesture-demo-btn" data-gesture="fist" type="button">握拳</button>
     </section>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script src="{{ url_for('static', filename='js/particles.js', v='33') }}"></script>
-  <script src="{{ url_for('static', filename='js/app.js', v='28') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js', v='29') }}"></script>
 </body>
 </html>

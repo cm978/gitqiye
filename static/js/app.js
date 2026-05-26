@@ -267,7 +267,7 @@ document.querySelectorAll(".nav-item").forEach((button) => {
     document.querySelectorAll(".mode-view").forEach((view) => view.classList.remove("active-view"));
     const modePanel = document.getElementById(`${state.mode}Mode`);
     if (modePanel) modePanel.classList.add("active-view");
-    if (pageTitle) pageTitle.textContent = button.textContent;
+    if (pageTitle) pageTitle.textContent = button.dataset.title || button.textContent.trim();
     document.body.classList.toggle("particle-focus", state.mode === "particles");
     if (state.mode === "particles") {
       startCamera().then(initHandTracking).catch(() => {});

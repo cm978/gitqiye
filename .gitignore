@@ -1,35 +1,50 @@
-# Python
+# Python cache / build output
 __pycache__/
 *.py[cod]
+*$py.class
 *.so
 *.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 dist/
 build/
+
+# Virtual environments
 .venv/
 venv/
 env/
 
-# Logs
+# Logs / runtime files
 *.log
+server.out.log
+server.err.log
 
-# IDE
+# Local configuration
+.env
+.env.*
+
+# IDE / OS files
 .vscode/
 .idea/
-
-# OS
 .DS_Store
 Thumbs.db
 
-# Test results
+# Test and browser artifacts
 test-results/
+playwright-report/
 
-# Checkpoints
-checkpoints/
-
-# Data
+# Datasets and generated samples
 data/
+!data/.gitkeep
 
-# Screenshots / uploads
-*.png
-*.jpg
-*.jpeg
+# Model checkpoints and trained weights
+checkpoints/
+*.pth
+*.pt
+*.onnx
+
+# Temporary screenshots / generated previews
+saturn-*-shot.png
+*-shot.png
+tmp-*.png
