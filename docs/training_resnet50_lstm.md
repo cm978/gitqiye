@@ -1,5 +1,40 @@
 # ResNet50-LSTM 动态手势训练说明
 
+## 当前模型阶段
+
+当前项目把“训练模型展示”和“实时交互体验”拆成两条链路。训练后的权重已放入 `checkpoints/ipn_resnet50_lstm/`，应用会自动加载目录中的 `best.pth`。“识别”页使用该模型展示训练成果；网页控制、媒体控制和粒子交互使用浏览器端实时手势引擎，以保证速度和体验。
+
+当前模型输入约定：
+
+```js
+{
+  frames: ["data:image/jpeg;base64,..."],
+  mode: "web"
+}
+```
+
+模型继续输出现有 8 类标签，并保持 `/api/predict` 返回结构兼容。
+
+## 实时交互说明
+
+实时交互不受当前 8 类训练标签限制。前端通过 `static/js/realtime_gestures.js` 调用 MediaPipe Tasks Gesture Recognizer，输出统一信号：
+
+```js
+{
+  source: "realtime",
+  gesture,
+  confidence,
+  center,
+  velocity,
+  openness,
+  pinch,
+  motion,
+  hands
+}
+```
+
+`app.js` 使用该信号直接驱动网页、媒体和 Three.js 粒子。后端 ResNet50-LSTM 结果保留为训练成果展示和历史记录。
+
 ## 数据目录方式
 
 适合已经把视频切成样本帧的情况：
@@ -70,6 +105,7 @@ python app.py
 ```
 
 程序会优先加载目录中的 `best.pth`，找不到时加载 `last.pth`。
+如果没有设置 `GESTURE_MODEL_PATH`，当前项目也会自动发现 `checkpoints/ipn_resnet50_lstm/best.pth`。
 
 ## 说明
 
@@ -88,7 +124,7 @@ python app.py
 模型路线：
 
 ```text
-MediaPipe 手部 ROI 裁剪
+摄像头帧中心裁剪
   ↓
 ResNet-50 CNN 每帧特征
   ↓

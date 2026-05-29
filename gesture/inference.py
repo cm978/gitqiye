@@ -1,6 +1,5 @@
 import base64
 import io
-import random
 import time
 from collections import deque
 from pathlib import Path
@@ -8,7 +7,7 @@ from pathlib import Path
 import torch
 from PIL import Image
 
-from config import DEFAULT_MODEL_PATH, GESTURE_LABELS, GESTURE_TO_ACTIONS, MODEL_CONFIG
+from config import CHECKPOINT_DIR, DEFAULT_CHECKPOINT, DEFAULT_MODEL_PATH, GESTURE_LABELS, GESTURE_TO_ACTIONS, MODEL_CONFIG
 from gesture.dataset import build_transform
 from gesture.model import ResNet50LSTM
 from gesture.preprocess import HandROICropper, PreprocessConfig
@@ -29,6 +28,12 @@ def resolve_checkpoint(path):
             if candidate.exists():
                 return candidate
         raise FileNotFoundError(f"no checkpoint found in directory: {path}")
+    if not path.exists() and path == DEFAULT_CHECKPOINT:
+        candidates = []
+        for name in ("best.pth", "last.pth", "gesture_resnet50_lstm.pth"):
+            candidates.extend(CHECKPOINT_DIR.glob(f"*/{name}"))
+        if candidates:
+            return max(candidates, key=lambda candidate: candidate.stat().st_mtime)
     return path
 
 
@@ -38,10 +43,9 @@ class GesturePredictor:
         self.checkpoint_path = resolve_checkpoint(checkpoint_path)
         self.demo_mode = demo_mode if demo_mode is not None else not self.checkpoint_path.exists()
         self.history = deque(maxlen=MODEL_CONFIG["stable_window"])
-        self.demo_index = 0
         self.labels = GESTURE_LABELS
         self.model_config = dict(MODEL_CONFIG)
-        self.preprocessing = {"roi_mode": "mediapipe"}
+        self.preprocessing = {"roi_mode": "center"}
         self.transform = build_transform(self.model_config["image_size"])
         self.cropper = HandROICropper(PreprocessConfig(roi_mode=self.preprocessing["roi_mode"]))
         self.model = None
@@ -51,7 +55,7 @@ class GesturePredictor:
             self.model_config.update(state.get("config", {}) if isinstance(state, dict) else {})
             self.preprocessing.update(state.get("preprocessing", {}) if isinstance(state, dict) else {})
             self.transform = build_transform(self.model_config["image_size"])
-            self.cropper = HandROICropper(PreprocessConfig(roi_mode=self.preprocessing.get("roi_mode", "mediapipe")))
+            self.cropper = HandROICropper(PreprocessConfig(roi_mode=self.preprocessing.get("roi_mode", "center")))
             self.model = ResNet50LSTM(
                 num_classes=len(self.labels),
                 hidden_size=self.model_config["hidden_size"],
@@ -62,11 +66,11 @@ class GesturePredictor:
             self.model.load_state_dict(state["model"] if isinstance(state, dict) and "model" in state else state)
             self.model.eval()
 
-    def predict(self, frames, mode="web"):
+    def predict(self, frames, mode="web", demo_gesture=None):
         started = time.perf_counter()
         if self.demo_mode:
-            label = self._next_demo_label()
-            confidence = round(random.uniform(0.72, 0.96), 4)
+            label = demo_gesture if demo_gesture in self.labels else "no_gesture"
+            confidence = 0.96 if label != "no_gesture" else 1.0
         else:
             label, confidence = self._predict_with_model(frames)
         action = GESTURE_TO_ACTIONS.get(mode, GESTURE_TO_ACTIONS["web"]).get(label, "保持当前状态")
@@ -94,12 +98,6 @@ class GesturePredictor:
             probs = torch.softmax(logits, dim=1)[0]
             confidence, index = torch.max(probs, dim=0)
         return self.labels[index.item()], round(confidence.item(), 4)
-
-    def _next_demo_label(self):
-        demo_labels = ["swipe_left", "swipe_left", "swipe_right", "swipe_right", "swipe_up", "swipe_up", "swipe_down", "swipe_down", "click", "click", "zoom_in", "zoom_in", "zoom_out", "zoom_out"]
-        label = demo_labels[self.demo_index % len(demo_labels)]
-        self.demo_index += 1
-        return label
 
     def _is_stable(self, label, confidence):
         if confidence < self.model_config["confidence_threshold"] or label == "no_gesture":

@@ -13,10 +13,11 @@ def predict():
     payload = request.get_json(force=True)
     frames = payload.get("frames", [])
     mode = payload.get("mode", "web")
+    demo_gesture = payload.get("demo_gesture")
     if not frames:
         return jsonify({"error": "frames is required"}), 400
     try:
-        return jsonify(predictor.predict(frames, mode=mode))
+        return jsonify(predictor.predict(frames, mode=mode, demo_gesture=demo_gesture))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
