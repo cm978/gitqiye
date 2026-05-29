@@ -1,4 +1,9 @@
-﻿const state = {
+﻿const TWO_FINGER_STORAGE_KEY = "gesturelab_two_finger_motion_v1";
+const TWO_FINGER_SAMPLE_LIMIT = 180;
+const ADAPTIVE_SWIPE_MIN_THRESHOLD = 0.14;
+const ADAPTIVE_SWIPE_MAX_THRESHOLD = 0.30;
+
+const state = {
   stream: null,
   view: "recognition",
   mode: "web",
@@ -14,19 +19,24 @@
   realtimeCooldowns: {},
   lastStaticGesture: null,
   lastStaticGestureAt: 0,
+  lastSwipeAction: null,
+  lastSwipeAt: 0,
+  lastCalibrationHintAt: 0,
+  twoFingerStroke: null,
+  twoFingerMotionSamples: loadTwoFingerMotionSamples(),
   demoMode: true,
   sequenceLength: 16,
   predicting: false,
   demoOverrideUntil: 0,
   longzuSectionIndex: 0,
   longzuCharacterIndex: 0,
+  longzuPointerTarget: null,
   longzuZoom: 1,
 };
 
 const REALTIME_ACTIONS = {
   open_palm: "zoom_in",
   fist: "zoom_out",
-  point: "click",
   confirm: "click",
   victory: "switch_preset",
   swipe_left: "swipe_left",
@@ -44,6 +54,13 @@ const REALTIME_ACTION_LABELS = {
   zoom_in: "实时扩散/放大",
   zoom_out: "实时聚拢/缩小",
   switch_preset: "切换粒子预设",
+};
+
+const SWIPE_OPPOSITES = {
+  swipe_left: "swipe_right",
+  swipe_right: "swipe_left",
+  swipe_up: "swipe_down",
+  swipe_down: "swipe_up",
 };
 
 const camera = document.getElementById("camera");
@@ -68,6 +85,9 @@ const pageTitle = document.getElementById("pageTitle");
 const longzuFrame = document.getElementById("longzuFrame");
 const longzuGestureHint = document.getElementById("longzuGestureHint");
 const realtimePill = document.getElementById("realtimePill");
+const gesturePointer = document.getElementById("gesturePointer");
+const gesturePointerLabel = document.getElementById("gesturePointerLabel");
+const longzuFingerRing = document.getElementById("longzuFingerRing");
 const LONGZU_SECTIONS = ["hero", "characters", "world", "enter"];
 
 async function loadStatus() {
@@ -214,27 +234,198 @@ function updateModelResult(result) {
 function handleRealtimeSignal(signal) {
   if (!signal) return;
   updateRealtimeStatus("ready");
+  const action = state.view === "recognition" ? null : mapRealtimeSignal(signal);
+  updateGesturePointer(signal, action);
   if (state.mode === "particles" && state.particleScene) {
     state.particleScene.updateHands(signal);
   }
   if (state.view === "recognition") return;
-  const action = mapRealtimeSignal(signal);
   if (!action || !signal.triggered) return;
   triggerRealtimeAction(action, signal);
 }
 
+function updateGesturePointer(signal, action) {
+  if (!gesturePointer || !gesturePointerLabel || !signal.center) return;
+  const longzuPointer = updateLongzuPointer(signal);
+  const x = longzuPointer ? longzuPointer.x : Math.round(signal.center.x * window.innerWidth);
+  const y = longzuPointer ? longzuPointer.y : Math.round(signal.center.y * window.innerHeight);
+  const singleFinger = Boolean(signal.handPose && signal.handPose.singleFingerPointer);
+  const twoFinger = Boolean(signal.handPose && signal.handPose.twoFingerNavigation);
+  const active = singleFinger || twoFinger;
+  gesturePointer.dataset.active = signal.hands ? "true" : "false";
+  gesturePointer.dataset.locked = state.lastSwipeAction && Date.now() - state.lastSwipeAt < 900 ? "true" : "false";
+  gesturePointer.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`;
+  if (singleFinger && state.view === "web") {
+    gesturePointerLabel.textContent = "单指聚焦";
+  } else if (action) {
+    gesturePointerLabel.textContent = `${twoFinger ? "两指" : "手势"} · ${getRealtimeActionLabel(action)}`;
+  } else if (twoFinger) {
+    gesturePointerLabel.textContent = "两指滑动";
+  } else if (active) {
+    gesturePointerLabel.textContent = "手指已聚焦";
+  } else {
+    gesturePointerLabel.textContent = signal.rawGesture || "检测到手";
+  }
+}
+
 function mapRealtimeSignal(signal) {
+  if (signal.handPose && signal.handPose.singleFingerPointer) return null;
+  if (signal.handPose && signal.handPose.twoFingerNavigation) recordTwoFingerMotion(signal);
   if (signal.gesture && signal.gesture.startsWith("swipe_")) {
     state.lastStaticGesture = null;
     state.lastStaticGestureAt = 0;
-    return REALTIME_ACTIONS[signal.gesture] || null;
+    const strokeSwipe = mapTwoFingerStrokeSwipe(signal);
+    const webAction = mapWebTwoFingerScrollAction(strokeSwipe, signal);
+    if (webAction) return webAction;
+    if (state.mode === "web") return null;
+    if (strokeSwipe) return strokeSwipe;
+    const adaptiveSwipe = mapAdaptiveTwoFingerSwipe(signal);
+    const webAdaptiveAction = mapWebTwoFingerScrollAction(adaptiveSwipe, signal);
+    if (webAdaptiveAction) return webAdaptiveAction;
+    const webRawAction = mapWebTwoFingerScrollAction(signal.gesture, signal);
+    if (webRawAction) return webRawAction;
+    if (state.mode === "web") return null;
+    return adaptiveSwipe || REALTIME_ACTIONS[signal.gesture] || null;
   }
+  const strokeSwipe = mapTwoFingerStrokeSwipe(signal);
+  const webAction = mapWebTwoFingerScrollAction(strokeSwipe, signal);
+  if (webAction) return webAction;
+  if (state.mode === "web" && strokeSwipe) return null;
+  if (strokeSwipe) return strokeSwipe;
+  const adaptiveSwipe = mapAdaptiveTwoFingerSwipe(signal);
+  const webAdaptiveAction = mapWebTwoFingerScrollAction(adaptiveSwipe, signal);
+  if (webAdaptiveAction) return webAdaptiveAction;
+  if (state.mode === "web" && adaptiveSwipe) return null;
+  if (adaptiveSwipe) return adaptiveSwipe;
   if (!isStaticRealtimeGesture(signal)) return null;
   return REALTIME_ACTIONS[signal.gesture] || null;
 }
 
+function recordTwoFingerMotion(signal) {
+  if (!signal.velocity) return;
+  const sample = {
+    at: Date.now(),
+    vx: roundMotion(signal.velocity.x || 0),
+    vy: roundMotion(signal.velocity.y || 0),
+    motion: roundMotion(Math.max(Math.abs(signal.velocity.x || 0), Math.abs(signal.velocity.y || 0))),
+    rawGesture: signal.rawGesture || null,
+    detectedGesture: signal.gesture || null,
+  };
+  state.twoFingerMotionSamples.push(sample);
+  state.twoFingerMotionSamples = state.twoFingerMotionSamples.slice(-TWO_FINGER_SAMPLE_LIMIT);
+  if (state.twoFingerMotionSamples.length % 8 === 0) {
+    saveTwoFingerMotionSamples();
+  }
+  updateTwoFingerCalibrationHint();
+}
+
+function mapAdaptiveTwoFingerSwipe(signal) {
+  if (!signal.handPose || !signal.handPose.twoFingerNavigation || !signal.velocity) return null;
+  const absX = Math.abs(signal.velocity.x || 0);
+  const absY = Math.abs(signal.velocity.y || 0);
+  const threshold = getAdaptiveSwipeThreshold();
+  const dominance = getAdaptiveSwipeDominance();
+  if (absX < threshold && absY < threshold) return null;
+  if (absX > absY * dominance) return signal.velocity.x > 0 ? "swipe_right" : "swipe_left";
+  if (absY > absX * dominance) return signal.velocity.y > 0 ? "swipe_down" : "swipe_up";
+  return null;
+}
+
+function mapTwoFingerStrokeSwipe(signal) {
+  if (!signal.handPose || !signal.handPose.twoFingerNavigation) {
+    state.twoFingerStroke = null;
+    return null;
+  }
+  const point = signal.pointer || signal.center;
+  if (!point) return null;
+
+  const now = Date.now();
+  const maxAge = 720;
+  if (!state.twoFingerStroke || now - state.twoFingerStroke.startedAt > maxAge) {
+    state.twoFingerStroke = { startedAt: now, x: point.x, y: point.y };
+    return null;
+  }
+
+  const dx = point.x - state.twoFingerStroke.x;
+  const dy = point.y - state.twoFingerStroke.y;
+  const absX = Math.abs(dx);
+  const absY = Math.abs(dy);
+  const distanceThreshold = Math.max(0.055, getAdaptiveSwipeThreshold() * 0.34);
+  const dominance = 1.04;
+  if (absX < distanceThreshold && absY < distanceThreshold) return null;
+
+  state.twoFingerStroke = { startedAt: now, x: point.x, y: point.y };
+  if (absX > absY * dominance) return dx > 0 ? "swipe_right" : "swipe_left";
+  if (absY > absX * dominance) return dy > 0 ? "swipe_down" : "swipe_up";
+  return null;
+}
+
+function mapWebTwoFingerScrollAction(action, signal) {
+  if (state.mode !== "web") return action;
+  if (!action) return null;
+  if (action !== "swipe_up") return null;
+  return isLeftHandSignal(signal) ? "swipe_down" : "swipe_up";
+}
+
+function isLeftHandSignal(signal) {
+  return Boolean(signal && signal.handedness === "left");
+}
+
+function getAdaptiveSwipeThreshold() {
+  const motions = state.twoFingerMotionSamples
+    .map((sample) => sample.motion)
+    .filter((motion) => motion > 0.05)
+    .sort((a, b) => a - b);
+  if (motions.length < 10) return 0.22;
+  return clampValue(percentile(motions, 0.72) * 0.78, ADAPTIVE_SWIPE_MIN_THRESHOLD, ADAPTIVE_SWIPE_MAX_THRESHOLD);
+}
+
+function getAdaptiveSwipeDominance() {
+  const motions = state.twoFingerMotionSamples.filter((sample) => sample.motion > 0.08);
+  if (motions.length < 16) return 1.18;
+  return 1.10;
+}
+
+function updateTwoFingerCalibrationHint() {
+  if (state.view !== "web") return;
+  const now = Date.now();
+  if (now - state.lastCalibrationHintAt < 1200) return;
+  state.lastCalibrationHintAt = now;
+  const count = Math.min(state.twoFingerMotionSamples.length, 30);
+  const threshold = Math.round(getAdaptiveSwipeThreshold() * 100);
+  updateLongzuHint(`两指动作记录 ${count}/30，当前触发灵敏度 ${threshold}%`);
+}
+
+function loadTwoFingerMotionSamples() {
+  try {
+    const raw = localStorage.getItem(TWO_FINGER_STORAGE_KEY);
+    const samples = raw ? JSON.parse(raw) : [];
+    return Array.isArray(samples) ? samples.slice(-TWO_FINGER_SAMPLE_LIMIT) : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveTwoFingerMotionSamples() {
+  try {
+    localStorage.setItem(TWO_FINGER_STORAGE_KEY, JSON.stringify(state.twoFingerMotionSamples.slice(-TWO_FINGER_SAMPLE_LIMIT)));
+  } catch (error) {
+    // Calibration is optional; interaction should continue if storage is unavailable.
+  }
+}
+
+function percentile(sortedValues, ratio) {
+  if (!sortedValues.length) return 0;
+  const index = Math.min(sortedValues.length - 1, Math.max(0, Math.floor(sortedValues.length * ratio)));
+  return sortedValues[index];
+}
+
+function roundMotion(value) {
+  return Math.round(value * 1000) / 1000;
+}
+
 function isStaticRealtimeGesture(signal) {
-  if (!["open_palm", "fist", "point", "confirm", "victory"].includes(signal.gesture)) return false;
+  if (!["open_palm", "fist", "confirm", "victory"].includes(signal.gesture)) return false;
   if (signal.motion > 0.12) return resetStaticGesture();
   const now = Date.now();
   if (state.lastStaticGesture !== signal.gesture) {
@@ -254,6 +445,7 @@ function resetStaticGesture() {
 }
 
 function triggerRealtimeAction(action, signal) {
+  if (action.startsWith("swipe_") && !canTriggerSwipeAction(action)) return;
   if (!canTriggerRealtimeAction(action)) return;
   const confidenceValue = Math.round((signal.confidence || 0) * 100);
   gestureName.textContent = signal.gesture || action;
@@ -276,6 +468,15 @@ function triggerRealtimeAction(action, signal) {
   }
 
   addHistory({ gesture: action, confidence: signal.confidence || 0, mode: state.mode, action: getRealtimeActionLabel(action), triggered: true, source: "realtime" });
+}
+
+function canTriggerSwipeAction(action) {
+  const now = Date.now();
+  const opposite = SWIPE_OPPOSITES[action];
+  if (opposite && state.lastSwipeAction === opposite && now - state.lastSwipeAt < 900) return false;
+  state.lastSwipeAction = action;
+  state.lastSwipeAt = now;
+  return true;
 }
 
 function canTriggerRealtimeAction(action) {
@@ -330,6 +531,70 @@ function getLongzuDocument() {
   }
 }
 
+function updateLongzuPointer(signal) {
+  if (state.view !== "web" || !longzuFrame || !signal.center || !signal.handPose || !signal.handPose.singleFingerPointer) {
+    clearLongzuPointerFocus();
+    updateLongzuFingerRing(null);
+    return null;
+  }
+
+  const longzuDocument = getLongzuDocument();
+  if (!longzuDocument) return null;
+
+  const rect = longzuFrame.getBoundingClientRect();
+  const pointer = signal.pointer || signal.center;
+  const screenX = rect.left + (1 - pointer.x) * rect.width;
+  const screenY = rect.top + pointer.y * rect.height;
+  const x = Math.round(clampValue(screenX, rect.left, rect.right));
+  const y = Math.round(clampValue(screenY, rect.top, rect.bottom));
+  updateLongzuFingerRing({ x, y });
+  const frameX = x - rect.left;
+  const frameY = y - rect.top;
+  const target = longzuDocument.elementFromPoint(frameX, frameY);
+  const focusTarget = target ? target.closest('a, button, [role="button"], .card') : null;
+  setLongzuPointerFocus(focusTarget);
+  return { x, y };
+}
+
+function updateLongzuFingerRing(point) {
+  if (!longzuFingerRing) return;
+  longzuFingerRing.dataset.active = point ? "true" : "false";
+  if (!point) return;
+  longzuFingerRing.style.transform = `translate3d(${point.x}px, ${point.y}px, 0) translate(-50%, -50%)`;
+}
+
+function setLongzuPointerFocus(target) {
+  if (state.longzuPointerTarget === target) return;
+  clearLongzuPointerFocus();
+  state.longzuPointerTarget = target;
+  if (!target) return;
+
+  target.dataset.gesturePointerFocus = "true";
+  target.style.outline = "2px solid rgba(66, 232, 255, 0.96)";
+  target.style.boxShadow = "0 0 0 6px rgba(66, 232, 255, 0.14), 0 20px 60px rgba(0, 0, 0, 0.38)";
+
+  const cards = getLongzuCharacterCards();
+  const card = target.matches('a.card[href*="characters/"]') ? target : target.closest('a.card[href*="characters/"]');
+  const index = card ? cards.indexOf(card) : -1;
+  if (index >= 0) {
+    state.longzuCharacterIndex = index;
+    updateLongzuHint("单指已聚焦人物档案，确认手势打开");
+  } else {
+    updateLongzuHint("单指移动聚焦，两指挥动滚动或切换");
+  }
+}
+
+function clearLongzuPointerFocus() {
+  const target = state.longzuPointerTarget;
+  if (!target) return;
+  delete target.dataset.gesturePointerFocus;
+  if (target.dataset.gestureActive !== "true") {
+    target.style.outline = "";
+    target.style.boxShadow = "";
+  }
+  state.longzuPointerTarget = null;
+}
+
 function applyLongzuAction(gesture) {
   const longzuWindow = getLongzuWindow();
   const longzuDocument = getLongzuDocument();
@@ -342,15 +607,15 @@ function applyLongzuAction(gesture) {
   }
   if (gesture === "swipe_down") {
     scrollLongzuPage(-1);
-    updateLongzuHint("下滑：向上返回龙族网页");
+    updateLongzuHint("左手上滑：向上返回龙族网页");
     return;
   }
   if (gesture === "swipe_left") {
-    moveLongzuFocus(-1);
+    updateLongzuHint("网页页已关闭左右滑，使用单指聚焦和确认手势选择内容");
     return;
   }
   if (gesture === "swipe_right") {
-    moveLongzuFocus(1);
+    updateLongzuHint("网页页已关闭左右滑，使用单指聚焦和确认手势选择内容");
     return;
   }
   if (gesture === "click") {
@@ -432,8 +697,9 @@ function highlightLongzuCharacter() {
   cards.forEach((card, index) => {
     const active = index === state.longzuCharacterIndex;
     card.dataset.gestureActive = active ? "true" : "false";
-    card.style.outline = active ? "2px solid rgba(255, 209, 102, 0.92)" : "";
-    card.style.boxShadow = active ? "0 0 0 6px rgba(255, 209, 102, 0.12), 0 22px 70px rgba(0, 0, 0, 0.42)" : "";
+    const pointerFocused = card.dataset.gesturePointerFocus === "true";
+    card.style.outline = pointerFocused ? card.style.outline : active ? "2px solid rgba(255, 209, 102, 0.92)" : "";
+    card.style.boxShadow = pointerFocused ? card.style.boxShadow : active ? "0 0 0 6px rgba(255, 209, 102, 0.12), 0 22px 70px rgba(0, 0, 0, 0.42)" : "";
   });
   if (cards[state.longzuCharacterIndex]) {
     cards[state.longzuCharacterIndex].scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
@@ -446,6 +712,17 @@ function openActiveLongzuCharacter() {
   if (!longzuDocument || !longzuWindow) return;
 
   const cards = getLongzuCharacterCards();
+  if (state.longzuPointerTarget && state.longzuPointerTarget.isConnected) {
+    const focusedLink = state.longzuPointerTarget.matches("a, button, [role='button']")
+      ? state.longzuPointerTarget
+      : state.longzuPointerTarget.closest("a, button, [role='button']");
+    if (focusedLink) {
+      focusedLink.click();
+      updateLongzuHint("正在打开单指聚焦内容");
+      return;
+    }
+  }
+
   if (cards.length) {
     highlightLongzuCharacter();
     cards[state.longzuCharacterIndex].click();
@@ -474,6 +751,10 @@ function zoomLongzuPage(delta) {
 function wrapIndex(index, length) {
   if (!length) return 0;
   return ((index % length) + length) % length;
+}
+
+function clampValue(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function updateLongzuHint(message) {

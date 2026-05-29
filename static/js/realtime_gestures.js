@@ -76,13 +76,17 @@
       const category = result.gestures && result.gestures[0] && result.gestures[0][0] ? result.gestures[0][0] : null;
       if (!primaryHand.length && !category) return null;
 
+      const handedness = getPrimaryHandedness(result);
       const center = primaryHand.length ? computeCenter(primaryHand) : { x: 0.5, y: 0.5 };
       const openness = primaryHand.length ? computeOpenness(primaryHand) : 0;
       const pinch = primaryHand.length ? computePinch(primaryHand) : 0;
-      const velocity = computeVelocity(center, now);
+      const handPose = primaryHand.length ? classifyHandPose(primaryHand) : { twoFingerNavigation: false, singleFingerPointer: false };
+      const motionPoint = primaryHand.length ? computeMotionPoint(primaryHand, handPose) : center;
+      const velocity = computeVelocity(motionPoint, now);
       const motion = Math.max(Math.abs(velocity.x), Math.abs(velocity.y));
+      const pointer = primaryHand.length ? computePointer(primaryHand, handPose) : center;
       const rawGesture = category ? category.categoryName : "Unknown";
-      const swipe = detectSwipe(velocity);
+      const swipe = detectSwipe(velocity, handPose);
       let gesture = swipe || CATEGORY_TO_GESTURE[rawGesture] || null;
 
       return {
@@ -91,13 +95,22 @@
         rawGesture,
         confidence: category ? category.score : 0,
         center,
+        pointer,
         velocity,
         openness,
         pinch,
         motion,
         hands: landmarks.length,
+        handPose,
+        handedness,
         triggered: Boolean(gesture),
       };
+    }
+
+    function getPrimaryHandedness(result) {
+      const category = result.handednesses && result.handednesses[0] && result.handednesses[0][0] ? result.handednesses[0][0] : null;
+      if (!category || !category.categoryName) return null;
+      return category.categoryName.toLowerCase();
     }
 
     function computeVelocity(center, now) {
@@ -146,7 +159,59 @@
     return clamp(1 - distance(thumb, index) / (palmSize * 1.45), 0, 1);
   }
 
-  function detectSwipe(velocity) {
+  function computePointer(hand, handPose) {
+    const indexTip = hand[8];
+    if (handPose.singleFingerPointer && indexTip) {
+      return { x: clamp(indexTip.x, 0, 1), y: clamp(indexTip.y, 0, 1) };
+    }
+    if (handPose.twoFingerNavigation) {
+      return averagePoints([hand[8], hand[12]], computeCenter(hand));
+    }
+    return computeCenter(hand);
+  }
+
+  function computeMotionPoint(hand, handPose) {
+    if (handPose.twoFingerNavigation) {
+      return averagePoints([hand[8], hand[12]], computeCenter(hand));
+    }
+    if (handPose.singleFingerPointer && hand[8]) {
+      return { x: clamp(hand[8].x, 0, 1), y: clamp(hand[8].y, 0, 1) };
+    }
+    return computeCenter(hand);
+  }
+
+  function averagePoints(points, fallback) {
+    const valid = points.filter(Boolean);
+    if (!valid.length) return fallback;
+    const total = valid.reduce((sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }), { x: 0, y: 0 });
+    return { x: total.x / valid.length, y: total.y / valid.length };
+  }
+
+  function classifyHandPose(hand) {
+    const indexExtended = isFingerExtended(hand, 8, 6);
+    const middleExtended = isFingerExtended(hand, 12, 10);
+    const ringExtended = isFingerExtended(hand, 16, 14);
+    const pinkyExtended = isFingerExtended(hand, 20, 18);
+    return {
+      indexExtended,
+      middleExtended,
+      ringExtended,
+      pinkyExtended,
+      singleFingerPointer: indexExtended && !middleExtended && !ringExtended && !pinkyExtended,
+      twoFingerNavigation: indexExtended && middleExtended && !ringExtended && !pinkyExtended,
+    };
+  }
+
+  function isFingerExtended(hand, tipIndex, pipIndex) {
+    const tip = hand[tipIndex];
+    const pip = hand[pipIndex];
+    const wrist = hand[0];
+    if (!tip || !pip || !wrist) return false;
+    return distance(tip, wrist) > distance(pip, wrist) * 1.08;
+  }
+
+  function detectSwipe(velocity, handPose) {
+    if (!handPose.twoFingerNavigation) return null;
     const absX = Math.abs(velocity.x);
     const absY = Math.abs(velocity.y);
     if (absX > 0.30 && absX > absY * 1.25) return velocity.x > 0 ? "swipe_right" : "swipe_left";
