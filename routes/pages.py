@@ -3,7 +3,8 @@
 from flask import Blueprint, render_template, send_from_directory
 
 pages_bp = Blueprint("pages", __name__)
-LONGZU_SITE_DIR = Path(__file__).resolve().parents[2] / "longzu-site"
+LONGZU_SITE_ROOT = Path(__file__).resolve().parents[2] / "longzu-site"
+LONGZU_SITE_DIR = LONGZU_SITE_ROOT / "longzu-site" if (LONGZU_SITE_ROOT / "longzu-site" / "index.html").exists() else LONGZU_SITE_ROOT
 
 
 @pages_bp.get("/")

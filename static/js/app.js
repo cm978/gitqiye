@@ -54,8 +54,8 @@ const REALTIME_ACTION_LABELS = {
   swipe_up: "实时上滑",
   swipe_down: "实时下滑",
   click: "实时确认",
-  zoom_in: "实时扩散/放大",
-  zoom_out: "实时聚拢/缩小",
+  zoom_in: "张开手掌 · 最大",
+  zoom_out: "握拳 · 最远",
   switch_preset: "切换粒子预设",
 };
 
@@ -850,8 +850,8 @@ function getParticleDemoState(gesture) {
     swipe_up: "上扬",
     swipe_down: "下落",
     click: "换色",
-    zoom_in: "扩散",
-    zoom_out: "聚拢",
+    zoom_in: "最大",
+    zoom_out: "最远",
   }[gesture] || "已触发";
 }
 

@@ -9,6 +9,10 @@ class ParticleScene {
     this.turbulence = 0.12;
     this.autoShow = true;
     this.lastHandAt = 0;
+    this.gestureState = "idle";
+    this.pendingGestureState = null;
+    this.pendingGestureFrames = 0;
+    this.lastGestureSwitchAt = 0;
     this.cameraZ = 132;
     this.targetCameraZ = 132;
     this.paletteShift = 0;
@@ -254,7 +258,7 @@ class ParticleScene {
 
   updateHands(handData) {
     if (!handData) {
-      if (Date.now() - this.lastHandAt > 900) this.autoShow = true;
+      if (Date.now() - this.lastHandAt > 1800) this.autoShow = true;
       return;
     }
     this.lastHandAt = Date.now();
@@ -262,9 +266,7 @@ class ParticleScene {
     const center = handData.center || { x: 0.5, y: 0.5 };
     const velocity = handData.velocity || { x: 0, y: 0 };
     const openness = this.clamp(handData.openness || 0, 0, 1);
-    const pinch = this.clamp(handData.pinch || 0, 0, 1);
     const motion = this.clamp(handData.motion || 0, 0, 1);
-    const hands = handData.hands || 1;
     this.handDrift.x += ((center.x - 0.5) * 2 - this.handDrift.x) * 0.18;
     this.handDrift.y += ((center.y - 0.5) * 2 - this.handDrift.y) * 0.18;
     this.fanForce.x += (this.clamp(velocity.x * 3.8, -1, 1) - this.fanForce.x) * 0.22;
@@ -272,10 +274,82 @@ class ParticleScene {
     this.followTarget.x = (center.x - 0.5) * 52;
     this.followTarget.y = (0.5 - center.y) * 34;
     this.verticalFlow += ((this.handDrift.y * 8) + (this.fanForce.y * 22) - this.verticalFlow) * 0.12;
-    this.scale = 0.82 + openness * 0.78 - pinch * 0.22 + (hands > 1 ? 0.16 : 0);
-    this.spread = Math.max(0.04, 0.08 + openness * 0.62 + motion * 0.45 - pinch * 0.16);
-    this.turbulence = 0.10 + motion * 1.2 + openness * 0.45;
-    this.targetCameraZ = 148 - openness * 54;
+
+    const binaryState = this.resolveBinaryGesture(handData.gesture, openness, handData.confidence || 0);
+    if (binaryState) {
+      this.updateBinaryGestureState(binaryState, motion);
+    } else if (this.gestureState === "idle") {
+      const initialState = openness >= 0.76 ? "open" : openness <= 0.18 ? "fist" : null;
+      if (initialState) this.updateBinaryGestureState(initialState, motion);
+    } else {
+      this.pendingGestureState = null;
+      this.pendingGestureFrames = 0;
+      this.turbulence += ((this.gestureState === "open" ? 0.50 : 0.12) + motion * 0.32 - this.turbulence) * 0.22;
+    }
+  }
+
+  resolveBinaryGesture(gesture, openness, confidence = 0) {
+    const trusted = confidence >= 0.48;
+    if ((gesture === "open_palm" || gesture === "zoom_in") && trusted) return "open";
+    if ((gesture === "fist" || gesture === "zoom_out") && trusted) return "fist";
+    if (this.gestureState === "open") {
+      if (openness <= 0.16) return "fist";
+      if (openness >= 0.48) return "open";
+      return null;
+    }
+    if (this.gestureState === "fist") {
+      if (openness >= 0.76) return "open";
+      if (openness <= 0.42) return "fist";
+      return null;
+    }
+    if (openness >= 0.76) return "open";
+    if (openness <= 0.18) return "fist";
+    return null;
+  }
+
+  updateBinaryGestureState(nextState, motion = 0) {
+    if (nextState === this.gestureState) {
+      this.pendingGestureState = null;
+      this.pendingGestureFrames = 0;
+      this.setBinaryGestureState(nextState, motion);
+      return;
+    }
+
+    if (nextState !== this.pendingGestureState) {
+      this.pendingGestureState = nextState;
+      this.pendingGestureFrames = 1;
+    } else {
+      this.pendingGestureFrames += 1;
+    }
+
+    const now = Date.now();
+    const requiredFrames = this.gestureState === "idle" ? 1 : 4;
+    const minSwitchMs = this.gestureState === "idle" ? 0 : 520;
+    if (this.pendingGestureFrames >= requiredFrames && now - this.lastGestureSwitchAt >= minSwitchMs) {
+      this.setBinaryGestureState(nextState, motion);
+      this.pendingGestureState = null;
+      this.pendingGestureFrames = 0;
+    }
+  }
+
+  setBinaryGestureState(state, motion = 0) {
+    if (state !== this.gestureState) this.lastGestureSwitchAt = Date.now();
+    this.gestureState = state;
+    this.autoShow = false;
+    this.lastHandAt = Date.now();
+    if (state === "open") {
+      this.scale = 1.78;
+      this.spread = 0.72;
+      this.turbulence = 0.52 + this.clamp(motion, 0, 1) * 0.36;
+      this.targetCameraZ = 84;
+      return;
+    }
+    if (state === "fist") {
+      this.scale = 0.66;
+      this.spread = 0.04;
+      this.turbulence = 0.11 + this.clamp(motion, 0, 1) * 0.12;
+      this.targetCameraZ = 170;
+    }
   }
 
   applyGesture(gesture, confidence = 0, triggered = false) {
@@ -285,10 +359,10 @@ class ParticleScene {
     if (gesture === "swipe_up") this.rotationBoost.x = -0.035;
     if (gesture === "swipe_down") this.rotationBoost.x = 0.035;
     if (gesture === "zoom_in" || gesture === "open_palm") {
-      this.updateHands({ openness: 1, motion: 0.85, hands: 2 });
+      this.setBinaryGestureState("open", 0.85);
     }
     if (gesture === "zoom_out" || gesture === "fist") {
-      this.updateHands({ openness: 0.08, motion: 0.35, hands: 1 });
+      this.setBinaryGestureState("fist", 0.35);
     }
     if (gesture === "click" && triggered) {
       this.paletteShift = (this.paletteShift + 1) % this.palette.length;
@@ -298,8 +372,9 @@ class ParticleScene {
 
   tick() {
     this.time += 0.01;
-    if (Date.now() - this.lastHandAt > 1100) {
+    if (Date.now() - this.lastHandAt > 2200) {
       this.autoShow = true;
+      this.gestureState = "idle";
       this.scale += (1.06 + Math.sin(this.time * 0.9) * 0.08 - this.scale) * 0.035;
       this.spread += (0.18 + Math.sin(this.time * 0.7) * 0.06 - this.spread) * 0.03;
       this.turbulence += (0.22 - this.turbulence) * 0.035;
@@ -312,7 +387,8 @@ class ParticleScene {
       this.followTarget.y *= 0.92;
       this.verticalFlow *= 0.94;
     }
-    this.cameraZ += (this.targetCameraZ - this.cameraZ) * 0.08;
+    const cameraEase = this.autoShow ? 0.08 : 0.16;
+    this.cameraZ += (this.targetCameraZ - this.cameraZ) * cameraEase;
     this.camera.position.z = this.cameraZ;
 
     this.updateParticlePositions();
