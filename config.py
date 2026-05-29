@@ -5,7 +5,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 CUSTOM_SAMPLE_DIR = DATA_DIR / "custom_samples"
 CHECKPOINT_DIR = BASE_DIR / "checkpoints"
-DEFAULT_CHECKPOINT = CHECKPOINT_DIR / "gesture_resnet50_lstm.pth"
+DEFAULT_CHECKPOINT = CHECKPOINT_DIR / "ipn_resnet50_lstm"
 DEFAULT_MODEL_PATH = Path(os.environ.get("GESTURE_MODEL_PATH", DEFAULT_CHECKPOINT))
 
 GESTURE_LABELS = [
