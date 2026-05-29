@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>动态手势识别与虚拟交互系统</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css', v='16') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css', v='17') }}">
 </head>
 <body>
   <main class="app-shell">
@@ -99,23 +99,19 @@
       </section>
 
       <section id="webView" class="view-panel">
-        <div class="module-stage surface">
-          <div class="module-copy">
+        <div class="module-stage surface longzu-stage">
+          <div class="module-copy longzu-toolbar">
             <span class="eyebrow">Web Control</span>
-            <h2>网页控制</h2>
-            <p>用动态手势完成页面切换、滚动和确认操作。</p>
+            <h2>龙族网页控制</h2>
+            <p id="longzuGestureHint">上下滑动滚动页面，左右切换章节，点击打开当前人物档案。</p>
           </div>
           <div id="webMode" class="mode-view active-view">
-            <div class="slides" id="slides">
-              <article class="slide active">
-                <span id="pageIndex">1 / 4</span>
-                <h3>内容切换</h3>
-                <p>左滑和右滑切换内容，上滑和下滑控制滚动，点击用于确认。</p>
-              </article>
-              <article class="slide"><span>2 / 4</span><h3>稳定触发</h3><p>识别结果稳定后再执行动作，减少误触发。</p></article>
-              <article class="slide"><span>3 / 4</span><h3>模式映射</h3><p>同一组手势在网页、媒体和粒子模式中可以执行不同操作。</p></article>
-              <article class="slide"><span>4 / 4</span><h3>权重接入</h3><p>训练权重放入指定目录后，系统会从 Demo 切换为真实推理。</p></article>
-            </div>
+            <iframe
+              id="longzuFrame"
+              class="longzu-frame"
+              src="/longzu-site/"
+              title="龙族网页"
+            ></iframe>
           </div>
         </div>
       </section>
@@ -203,8 +199,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-  <script src="{{ url_for('static', filename='js/gesture_rules.js', v='4') }}"></script>
+  <script src="{{ url_for('static', filename='js/gesture_rules.js', v='6') }}"></script>
   <script src="{{ url_for('static', filename='js/particles.js', v='36') }}"></script>
-  <script src="{{ url_for('static', filename='js/app.js', v='33') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js', v='36') }}"></script>
 </body>
 </html>

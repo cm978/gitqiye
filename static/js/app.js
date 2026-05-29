@@ -12,11 +12,14 @@
   handSignal: null,
   gestureRuleState: window.GestureRules ? window.GestureRules.createGestureRuleState() : null,
   pendingDemoGesture: null,
+  pendingDemoGestureRepeats: 0,
   demoOverrideUntil: 0,
   handTracker: null,
   handTrackingBusy: false,
   lastHandSignature: null,
   lastHandCenter: null,
+  longzuSectionIndex: 0,
+  longzuCharacterIndex: 0,
 };
 
 const camera = document.getElementById("camera");
@@ -38,6 +41,9 @@ const fpsPill = document.getElementById("fpsPill");
 const particleConfidence = document.getElementById("particleConfidence");
 const particleState = document.getElementById("particleState");
 const pageTitle = document.getElementById("pageTitle");
+const longzuFrame = document.getElementById("longzuFrame");
+const longzuGestureHint = document.getElementById("longzuGestureHint");
+const LONGZU_SECTIONS = ["hero", "characters", "world", "enter"];
 
 async function loadStatus() {
   const response = await fetch("/api/status");
@@ -102,12 +108,13 @@ function initHandTracking() {
     const center = computeHandsCenter(hands);
     const pinch = computeHandPinch(hands);
     const velocity = computeHandVelocity(center);
+    const palm = computePalmSignal(hands);
     const signature = hands.flatMap((hand) => [hand[0].x, hand[0].y, hand[9].x, hand[9].y]).join(",");
     const motion = computeHandMotion(signature);
-    state.handSignal = { hasHands: true, hands: hands.length, center, openness, pinch, motion, velocity };
+    state.handSignal = { hasHands: true, hands: hands.length, center, openness, pinch, motion, velocity, palmFacingCamera: palm.facingCamera, palmDirection: palm.direction };
     if (state.demoMode && window.GestureRules && state.gestureRuleState) {
       const liveGesture = window.GestureRules.classifyDemoGesture(state.handSignal, state.gestureRuleState);
-      if (liveGesture) state.pendingDemoGesture = liveGesture;
+      if (liveGesture) queueDemoGesture(liveGesture);
     }
     if (state.mode === "particles" && state.particleScene) {
       state.particleScene.updateHands(state.handSignal);
@@ -162,6 +169,41 @@ function computeHandPinch(hands) {
   return values.reduce((sum, value) => sum + value, 0) / Math.max(values.length, 1);
 }
 
+function computePalmSignal(hands) {
+  const values = hands.map((hand) => {
+    const wrist = hand[0];
+    const indexBase = hand[5];
+    const middleBase = hand[9];
+    const pinkyBase = hand[17];
+    const palmWidth = Math.hypot(indexBase.x - pinkyBase.x, indexBase.y - pinkyBase.y) || 0.08;
+    const palmHeight = Math.hypot(wrist.x - middleBase.x, wrist.y - middleBase.y) || 0.08;
+    const facingScore = palmWidth / palmHeight;
+    return {
+      facingCamera: facingScore >= 0.68,
+      direction: {
+        x: middleBase.x - wrist.x,
+        y: middleBase.y - wrist.y,
+        z: (middleBase.z || 0) - (wrist.z || 0),
+      },
+    };
+  });
+  const facingCamera = values.some((value) => value.facingCamera);
+  const direction = values.reduce((sum, value) => ({
+    x: sum.x + value.direction.x,
+    y: sum.y + value.direction.y,
+    z: sum.z + value.direction.z,
+  }), { x: 0, y: 0, z: 0 });
+  const count = Math.max(values.length, 1);
+  return {
+    facingCamera,
+    direction: {
+      x: direction.x / count,
+      y: direction.y / count,
+      z: direction.z / count,
+    },
+  };
+}
+
 function computeHandsCenter(hands) {
   const points = hands.flatMap((hand) => hand);
   const total = points.reduce((sum, point) => ({
@@ -205,12 +247,11 @@ async function predictLoop() {
     state.frames = state.frames.slice(-16);
     if (state.frames.length >= 4) await predict();
   }
-  setTimeout(predictLoop, 900);
+  setTimeout(predictLoop, 360);
 }
 
 async function predict() {
-  const demoGesture = state.demoMode ? state.pendingDemoGesture : null;
-  state.pendingDemoGesture = null;
+  const demoGesture = state.demoMode ? consumeDemoGesture() : null;
   const body = { frames: state.frames, mode: state.mode };
   if (demoGesture) body.demo_gesture = demoGesture;
   const response = await fetch("/api/predict", {
@@ -235,6 +276,21 @@ async function predict() {
   if (result.triggered) applyAction(result.gesture);
 }
 
+function queueDemoGesture(gesture) {
+  state.pendingDemoGesture = gesture;
+  state.pendingDemoGestureRepeats = 2;
+}
+
+function consumeDemoGesture() {
+  if (!state.pendingDemoGesture || state.pendingDemoGestureRepeats <= 0) return null;
+  const gesture = state.pendingDemoGesture;
+  state.pendingDemoGestureRepeats -= 1;
+  if (state.pendingDemoGestureRepeats <= 0) {
+    state.pendingDemoGesture = null;
+  }
+  return gesture;
+}
+
 function addHistory(result) {
   const row = document.createElement("tr");
   row.innerHTML = `<td>${new Date().toLocaleTimeString()}</td><td>${result.gesture}</td><td>${Math.round(result.confidence * 100)}%</td><td>${result.mode}</td><td>${result.triggered ? result.action : "未触发"}</td>`;
@@ -248,14 +304,158 @@ function applyAction(gesture) {
 }
 
 function applyWebAction(gesture) {
-  const slides = [...document.querySelectorAll(".slide")];
-  if (gesture === "swipe_left") state.slideIndex = Math.max(0, state.slideIndex - 1);
-  if (gesture === "swipe_right") state.slideIndex = Math.min(slides.length - 1, state.slideIndex + 1);
-  if (gesture === "swipe_up") document.getElementById("slides").scrollBy({ top: -80, behavior: "smooth" });
-  if (gesture === "swipe_down") document.getElementById("slides").scrollBy({ top: 80, behavior: "smooth" });
-  slides.forEach((slide, index) => slide.classList.toggle("active", index === state.slideIndex));
-  const activeCounter = slides[state.slideIndex].querySelector("span");
-  if (activeCounter) activeCounter.textContent = `${state.slideIndex + 1} / ${slides.length}`;
+  applyLongzuAction(gesture);
+}
+
+function getLongzuWindow() {
+  try {
+    return longzuFrame && longzuFrame.contentWindow ? longzuFrame.contentWindow : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function getLongzuDocument() {
+  const longzuWindow = getLongzuWindow();
+  try {
+    return longzuWindow && longzuWindow.document ? longzuWindow.document : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function applyLongzuAction(gesture) {
+  const longzuWindow = getLongzuWindow();
+  const longzuDocument = getLongzuDocument();
+  if (!longzuWindow || !longzuDocument) return;
+
+  if (gesture === "swipe_up") {
+    scrollLongzuPage(1);
+    updateLongzuHint("上滑：向下翻阅龙族网页");
+    return;
+  }
+  if (gesture === "swipe_down") {
+    scrollLongzuPage(-1);
+    updateLongzuHint("下滑：向上返回龙族网页");
+    return;
+  }
+  if (gesture === "swipe_left") {
+    moveLongzuFocus(-1);
+    return;
+  }
+  if (gesture === "swipe_right") {
+    moveLongzuFocus(1);
+    return;
+  }
+  if (gesture === "click") {
+    openActiveLongzuCharacter();
+  }
+}
+
+function scrollLongzuPage(direction) {
+  const longzuWindow = getLongzuWindow();
+  const longzuDocument = getLongzuDocument();
+  if (!longzuWindow || !longzuDocument) return;
+
+  const distance = Math.round((longzuWindow.innerHeight || longzuFrame.clientHeight || 600) * 0.72) * direction;
+  longzuWindow.scrollBy({ top: distance, behavior: "smooth" });
+  longzuDocument.documentElement.scrollBy({ top: distance, behavior: "smooth" });
+  if (longzuDocument.body) longzuDocument.body.scrollBy({ top: distance, behavior: "smooth" });
+}
+
+function moveLongzuFocus(direction) {
+  const longzuDocument = getLongzuDocument();
+  if (!longzuDocument) return;
+
+  const activeSection = getActiveLongzuSection();
+  if (activeSection === "characters" && getLongzuCharacterCards().length) {
+    state.longzuCharacterIndex = wrapIndex(state.longzuCharacterIndex + direction, getLongzuCharacterCards().length);
+    highlightLongzuCharacter();
+    updateLongzuHint("已选择人物档案，点击手势打开");
+    return;
+  }
+
+  state.longzuSectionIndex = wrapIndex(getLongzuSectionIndex() + direction, LONGZU_SECTIONS.length);
+  const target = longzuDocument.getElementById(LONGZU_SECTIONS[state.longzuSectionIndex]);
+  if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+  updateLongzuHint(`切换到 ${LONGZU_SECTIONS[state.longzuSectionIndex]} 区域`);
+}
+
+function getActiveLongzuSection() {
+  return LONGZU_SECTIONS[getLongzuSectionIndex()] || "hero";
+}
+
+function getLongzuSectionIndex() {
+  const longzuWindow = getLongzuWindow();
+  const longzuDocument = getLongzuDocument();
+  if (!longzuWindow || !longzuDocument) return state.longzuSectionIndex;
+
+  const sections = LONGZU_SECTIONS
+    .map((id) => longzuDocument.getElementById(id))
+    .filter(Boolean);
+  const scrollTop = longzuWindow.scrollY || longzuDocument.documentElement.scrollTop || 0;
+  let closestIndex = state.longzuSectionIndex;
+  let closestDistance = Number.POSITIVE_INFINITY;
+  sections.forEach((section, index) => {
+    const distance = Math.abs(section.offsetTop - scrollTop);
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestIndex = index;
+    }
+  });
+  state.longzuSectionIndex = closestIndex;
+  return closestIndex;
+}
+
+function getLongzuCharacterCards() {
+  const longzuDocument = getLongzuDocument();
+  if (!longzuDocument) return [];
+  return [...longzuDocument.querySelectorAll('a.card[href*="characters/"]')];
+}
+
+function highlightLongzuCharacter() {
+  const cards = getLongzuCharacterCards();
+  cards.forEach((card, index) => {
+    const active = index === state.longzuCharacterIndex;
+    card.dataset.gestureActive = active ? "true" : "false";
+    card.style.outline = active ? "2px solid rgba(255, 209, 102, 0.92)" : "";
+    card.style.boxShadow = active ? "0 0 0 6px rgba(255, 209, 102, 0.12), 0 22px 70px rgba(0, 0, 0, 0.42)" : "";
+  });
+  if (cards[state.longzuCharacterIndex]) {
+    cards[state.longzuCharacterIndex].scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+  }
+}
+
+function openActiveLongzuCharacter() {
+  const longzuDocument = getLongzuDocument();
+  const longzuWindow = getLongzuWindow();
+  if (!longzuDocument || !longzuWindow) return;
+
+  const cards = getLongzuCharacterCards();
+  if (cards.length) {
+    highlightLongzuCharacter();
+    cards[state.longzuCharacterIndex].click();
+    updateLongzuHint("正在打开人物档案");
+    return;
+  }
+
+  const profile = longzuDocument.getElementById("profile");
+  if (profile) {
+    profile.scrollIntoView({ behavior: "smooth", block: "start" });
+    updateLongzuHint("打开人物 Profile 区域");
+    return;
+  }
+
+  longzuWindow.scrollBy({ top: Math.round(longzuWindow.innerHeight * 0.72), behavior: "smooth" });
+}
+
+function wrapIndex(index, length) {
+  if (!length) return 0;
+  return ((index % length) + length) % length;
+}
+
+function updateLongzuHint(message) {
+  if (longzuGestureHint) longzuGestureHint.textContent = message;
 }
 
 function applyMediaAction(gesture) {
