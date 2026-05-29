@@ -3,11 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>量子全息手势控制终端 v4</title>
+    <title>超长写字画布 v4</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-    <!-- Three.js -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <!-- MediaPipe Hands -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <!-- MediaPipe Pose -->
@@ -38,7 +36,6 @@
             height: 100vh;
         }
 
-        #webgl-canvas { z-index: 0; transition: opacity 0.5s ease; }
         #video-canvas { z-index: 1; transition: opacity 0.5s ease; }
         #draw-canvas { z-index: 2; pointer-events: none; }
         #hud-canvas { z-index: 3; pointer-events: none; }
@@ -101,7 +98,6 @@
 </head>
 <body>
     <video id="webcam" playsinline autoplay muted></video>
-    <canvas id="webgl-canvas"></canvas>
     <canvas id="video-canvas"></canvas>
     <canvas id="draw-canvas"></canvas>
     <canvas id="hud-canvas"></canvas>
@@ -119,21 +115,20 @@
         <div id="sidebar-container" class="relative pointer-events-auto w-72 h-fit">
             <aside class="panel corner w-full h-fit p-4 rounded-xl space-y-4">
                 <div>
-                    <h1 class="text-lg font-black tracking-widest text-sky-300">QUANTUM TERMINAL</h1>
-                    <p class="text-[10px] text-sky-600 mt-1">MULTIPLE GESTURE MODES v4.0</p>
+                    <h1 class="text-lg font-black tracking-widest text-sky-300">超长写字画布</h1>
+                    <p class="text-[10px] text-sky-600 mt-1">GESTURE WRITING CANVAS v4.0</p>
                 </div>
 
-                <!-- 模式切换 -->
+                <!-- 单一画布功能 -->
                 <div class="space-y-2">
-                    <div class="text-[11px] text-sky-500 border-b border-sky-900/60 pb-1">操作模式 / OPERATION MODE</div>
-                    <button class="tab-button active rounded-lg" data-mode="write">模式A / 超长写字画布</button>
-                    <button class="tab-button rounded-lg" data-mode="nebula">模式B / 量子星云球</button>
+                    <div class="text-[11px] text-sky-500 border-b border-sky-900/60 pb-1">画布功能 / CANVAS MODE</div>
+                    <div class="tab-button active rounded-lg">超长写字画布</div>
                 </div>
 
-                <!-- 效果选项卡 (仅在模式A展示) -->
+                <!-- 显示效果选项卡 -->
                 <div id="effect-select-panel" class="hidden space-y-2">
                     <div class="text-[11px] text-sky-500 border-b border-sky-900/60 pb-1">显示效果 / VISUAL FILTER</div>
-                    <button class="effect-tab-button tab-button active rounded-lg text-xs" data-effect="holo">01 / 深色全息</button>
+                    <button class="effect-tab-button tab-button active rounded-lg text-xs" data-effect="holo">01 / 深色荧光</button>
                     <button class="effect-tab-button tab-button rounded-lg text-xs" data-effect="ink">02 / 水墨暗影</button>
                     <button class="effect-tab-button tab-button rounded-lg text-xs" data-effect="edge">03 / 蓝色边缘</button>
                     <button class="effect-tab-button tab-button rounded-lg text-xs" data-effect="thermal">04 / 热成像</button>
@@ -143,9 +138,9 @@
                 <div class="space-y-2 text-xs">
                     <div class="text-[11px] text-sky-500 border-b border-sky-900/60 pb-1">系统监测 / PARAMETERS</div>
                     <div class="flex justify-between"><span class="text-sky-600">CAMERA:</span><span id="camera-state" class="text-emerald-400">WAITING</span></div>
-                    <div class="flex justify-between"><span class="text-sky-600">MODE:</span><span id="mode-state" class="text-sky-300 font-bold">A / 写字画布</span></div>
-                    <div class="flex justify-between"><span class="text-sky-600">PAGE / SCALE:</span><span id="frame-state" class="text-sky-300">PAGE 01</span></div>
-                    <div class="flex justify-between"><span class="text-sky-600">PEN / FLIGHT:</span><span id="pen-state" class="text-sky-300">等待右手</span></div>
+                    <div class="flex justify-between"><span class="text-sky-600">MODE:</span><span id="mode-state" class="text-sky-300 font-bold">超长写字画布</span></div>
+                    <div class="flex justify-between"><span class="text-sky-600">PAGE / OFFSET:</span><span id="frame-state" class="text-sky-300">PAGE 01</span></div>
+                    <div class="flex justify-between"><span class="text-sky-600">PEN:</span><span id="pen-state" class="text-sky-300">等待右手</span></div>
                     <div class="flex justify-between"><span class="text-sky-600">FPS:</span><span id="fps-state" class="text-sky-300">--</span></div>
                 </div>
 
@@ -167,7 +162,7 @@
             <div class="text-sky-300 font-bold tracking-widest mb-1.5">[ GESTURE STATS ]</div>
             <div id="gesture-state" class="text-sky-400 font-bold">等待手势输入</div>
             <div id="protocol-desc" class="mt-3 text-[10px] text-sky-500/80 leading-relaxed max-w-xs border-t border-sky-900/60 pt-2 space-y-1">
-                <p class="font-bold text-sky-300">模式A (写字画布) 协议：</p>
+                <p class="font-bold text-sky-300">超长写字画布协议：</p>
                 <p>右手捏合: 凌空书写/抬笔。</p>
                 <p>左手挥动: 推动画布翻页。</p>
                 <p>左手捏合/握拳: 切换画笔颜色。</p>
@@ -178,8 +173,8 @@
     <!-- 启动摄像头覆盖层 -->
     <div id="camera-overlay" class="fixed inset-0 z-20 flex items-center justify-center bg-black/90 text-center text-sky-400 p-8">
         <div class="panel corner relative p-8 rounded-xl max-w-md">
-            <div class="text-xl font-bold tracking-widest text-sky-300">全息摄像头就绪</div>
-            <p class="text-sm text-sky-600 mt-3 leading-relaxed">系统已经更新到 v4 多模式版本。请使用本地环回地址访问并允许摄像头权限。</p>
+            <div class="text-xl font-bold tracking-widest text-sky-300">超长写字画布就绪</div>
+            <p class="text-sm text-sky-600 mt-3 leading-relaxed">请使用本地环回地址访问并允许摄像头权限。启动后，右手捏合书写，左手拖动画布。</p>
             <button id="overlay-start-btn" class="mt-6 px-5 py-2 rounded-lg border border-sky-400/50 bg-sky-950/70 text-sky-100 hover:bg-sky-900 transition">启动摄像头</button>
             <div id="camera-error" class="mt-4 text-xs text-rose-300"></div>
         </div>
@@ -190,7 +185,6 @@
         const videoCanvas = document.getElementById('video-canvas');
         const drawCanvas = document.getElementById('draw-canvas');
         const hudCanvas = document.getElementById('hud-canvas');
-        const webglCanvas = document.getElementById('webgl-canvas');
         
         const vctx = videoCanvas.getContext('2d');
         const dctx = drawCanvas.getContext('2d');
@@ -224,7 +218,6 @@
         });
 
         // 状态变量
-        let currentMode = 'write'; // 'write' or 'nebula'
         let currentEffect = 'holo';
         let cameraStarted = false;
         let latestHands = [];
@@ -334,175 +327,9 @@
             dctx.lineCap = 'round';
             dctx.lineJoin = 'round';
 
-            if (renderer) {
-                renderer.setSize(window.innerWidth, window.innerHeight);
-                camera3D.aspect = window.innerWidth / window.innerHeight;
-                camera3D.updateProjectionMatrix();
-            }
         }
         window.addEventListener('resize', resizeAll);
 
-        // ==========================================
-        // THREE.JS 引擎初始化 (模式B 量子星云)
-        // ==========================================
-        let scene, camera3D, renderer, particleSphere;
-        const particleCount = 4500;
-        const sphereRadius = 6.0;
-
-        let currentRotationSpeedY = 0;
-        let targetRotationSpeedY = 0;
-        let currentSphereScale = 1.0;
-        let targetSphereScale = 1.0;
-        let targetCameraZ = 15;
-        let currentCameraZ = 15;
-
-        let lastHandX = null;
-        let lastHandTimestamp = performance.now();
-        let smoothedWaveVelocity = 0;
-
-        function initThreeJS() {
-            scene = new THREE.Scene();
-            camera3D = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera3D.position.z = 15;
-
-            renderer = new THREE.WebGLRenderer({ canvas: webglCanvas, antialias: true, alpha: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-            renderer.setClearColor(0x000000, 0);
-
-            // 创建量子星云粒子球
-            const geometry = new THREE.BufferGeometry();
-            const positions = new Float32Array(particleCount * 3);
-            const colors = new Float32Array(particleCount * 3);
-
-            for (let i = 0; i < particleCount; i++) {
-                const phi = Math.acos(-1 + (2 * i) / particleCount);
-                const theta = Math.sqrt(particleCount * Math.PI) * phi;
-
-                const dist = sphereRadius + (Math.random() - 0.5) * 1.8;
-                positions[i * 3] = dist * Math.cos(theta) * Math.sin(phi);
-                positions[i * 3 + 1] = dist * Math.sin(theta) * Math.sin(phi);
-                positions[i * 3 + 2] = dist * Math.cos(phi);
-
-                // 星云配色（霓虹蓝、粉）
-                const ratio = i / particleCount;
-                colors[i * 3] = ratio > 0.5 ? 0.0 : 0.95;       // R
-                colors[i * 3 + 1] = ratio > 0.5 ? 0.72 : 0.15;  // G
-                colors[i * 3 + 2] = 1.0;                        // B
-            }
-
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-            function createParticleTexture() {
-                const canvas = document.createElement('canvas');
-                canvas.width = 16; canvas.height = 16;
-                const ctx = canvas.getContext('2d');
-                const grad = ctx.createRadialGradient(8, 8, 0, 8, 8, 8);
-                grad.addColorStop(0, 'rgba(255,255,255,1)');
-                grad.addColorStop(0.3, 'rgba(0,192,255,0.75)');
-                grad.addColorStop(1, 'rgba(0,0,0,0)');
-                ctx.fillStyle = grad;
-                ctx.fillRect(0, 0, 16, 16);
-                return new THREE.CanvasTexture(canvas);
-            }
-
-            const material = new THREE.PointsMaterial({
-                size: 0.22,
-                vertexColors: true,
-                transparent: true,
-                opacity: 0.9,
-                blending: THREE.AdditiveBlending,
-                depthWrite: false,
-                map: createParticleTexture()
-            });
-
-            particleSphere = new THREE.Points(geometry, material);
-            scene.add(particleSphere);
-        }
-
-        function animateThreeJS() {
-            requestAnimationFrame(animateThreeJS);
-            if (currentMode !== 'nebula') return;
-
-            // 平滑旋转
-            currentRotationSpeedY += (targetRotationSpeedY - currentRotationSpeedY) * 0.08;
-            particleSphere.rotation.y += currentRotationSpeedY;
-            particleSphere.rotation.x += 0.001; // 微弱自转
-
-            // 平滑缩放
-            currentSphereScale += (targetSphereScale - currentSphereScale) * 0.08;
-            particleSphere.scale.set(currentSphereScale, currentSphereScale, currentSphereScale);
-
-            // 镜头推进动画 (双手大张开时进入球内部)
-            currentCameraZ += (targetCameraZ - currentCameraZ) * 0.08;
-            camera3D.position.z = currentCameraZ;
-
-            // 微弱旋转抖动增强内部沉浸感
-            if (currentCameraZ < 5) {
-                camera3D.rotation.y = Math.sin(performance.now() * 0.0015) * 0.05;
-                camera3D.rotation.x = Math.cos(performance.now() * 0.001) * 0.05;
-            } else {
-                camera3D.rotation.set(0, 0, 0);
-            }
-
-            renderer.render(scene, camera3D);
-        }
-
-        // ==========================================
-        // 模式切换与选项卡逻辑
-        // ==========================================
-        document.querySelectorAll('[data-mode]').forEach(button => {
-            button.addEventListener('click', () => {
-                document.querySelectorAll('[data-mode]').forEach(btn => btn.classList.remove('active'));
-                button.classList.add('active');
-                
-                currentMode = button.dataset.mode;
-                isDrawing = false;
-                lastPen = null;
-
-                if (currentMode === 'write') {
-                    modeState.textContent = 'A / 写字画布';
-                    effectSelectPanel.style.display = 'none';
-                    writeToggleBtn.style.display = 'none';
-                    clearBtn.style.display = 'block';
-                    webglCanvas.style.opacity = '0';
-                    videoCanvas.style.opacity = '1';
-                    colorFrame = null;
-                    targetFrame = null;
-                    
-                    protocolDesc.innerHTML = `
-                        <p class="font-bold text-sky-300">模式A (写字画布) 协议：</p>
-                        <p>右手捏合: 写字。</p>
-                        <p>左手挥动: 推动画布翻页。</p>
-                        <p>左手捏合/握拳: 切换颜色。</p>
-                        <p>身体骨骼: 粉紫霓虹追踪。</p>
-                    `;
-                } else {
-                    modeState.textContent = 'B / 量子星云';
-                    effectSelectPanel.style.display = 'none';
-                    writeToggleBtn.style.display = 'none';
-                    clearBtn.style.display = 'none';
-                    webglCanvas.style.opacity = '1';
-                    // 模式B中人像透明度减弱，作为背景辅助
-                    videoCanvas.style.opacity = '0.22';
-                    
-                    // 重置3D缩放
-                    targetSphereScale = 1.0;
-                    targetCameraZ = 15;
-
-                    protocolDesc.innerHTML = `
-                        <p class="font-bold text-sky-300">模式B (量子星云) 协议：</p>
-                        <p>🖐️ 双手张开: 量子星云球放大。</p>
-                        <p>✊ 双手握拳: 粒子球缩紧减小。</p>
-                        <p>↔️ 双指挥动: 星云球左右旋转。</p>
-                        <p>🚀 双手极大张开: <b>推进进入粒子球内部！</b></p>
-                    `;
-                }
-            });
-        });
-
-        // 滤镜切换
         document.querySelectorAll('[data-effect]').forEach(button => {
             button.addEventListener('click', () => {
                 document.querySelectorAll('[data-effect]').forEach(btn => btn.classList.remove('active'));
@@ -587,11 +414,10 @@
         function renderVideo() {
             if (video.readyState >= 2) {
                 vctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
-                drawMirroredVideo(vctx, currentMode === 'write' ? 'none' : getFilter());
+                drawMirroredVideo(vctx, 'none');
 
-                if (currentMode === 'write') {
-                    const W = window.innerWidth;
-                    const H = window.innerHeight;
+                const W = window.innerWidth;
+                const H = window.innerHeight;
                     const time = performance.now() * 0.0004;
                     const breath = (Math.sin(time * 1.8) + 1) / 2;
 
@@ -654,16 +480,15 @@
                 // 平滑过渡
                 canvasOffsetX += (targetCanvasOffsetX - canvasOffsetX) * 0.18;
                 drawCanvas.style.transform = `translateX(${canvasOffsetX}px)`;
-            }
             requestAnimationFrame(renderVideo);
         }
 
-        // 模式A: 绘字
+        // 超长写字画布：绘字
         function updateDrawing(hand) {
-            if (!writingEnabled || currentMode !== 'write') {
+            if (!writingEnabled) {
                 isDrawing = false;
                 lastPen = null;
-                penState.textContent = currentMode === 'write' ? '关闭' : '--';
+                penState.textContent = '关闭';
                 return;
             }
 
@@ -721,69 +546,6 @@
             }
         }
 
-        // 模式B: 粒子交互
-        function updateNebulaInteraction(hands) {
-            if (currentMode !== 'nebula' || !hands.length) {
-                if (currentMode === 'nebula') {
-                    // 没有手，缓慢静止并复位
-                    targetRotationSpeedY *= 0.95;
-                    targetSphereScale += (1.0 - targetSphereScale) * 0.1;
-                    targetCameraZ += (15 - targetCameraZ) * 0.1;
-                    frameState.textContent = '---';
-                    penState.textContent = '---';
-                }
-                return;
-            }
-
-            const isDoubleHands = hands.length >= 2;
-            const handInfo = hands.map(hand => analyzeOpen(hand));
-            const avgOpenness = handInfo.reduce((sum, item) => sum + item.openness, 0) / hands.length;
-
-            // 1. 缩放控制 (双手/单手张开放大，双手/单手握紧缩小)
-            // 张大增加到 2.2 倍，全握紧减小到 0.45 倍
-            targetSphereScale = 0.45 + avgOpenness * 1.75;
-            frameState.textContent = `${Math.round(avgOpenness * 100)}% 开度`;
-
-            // 2. 双手张开，推进进入球体内部 (Fly-in)
-            // 当检测到两只手，并且它们的平均张开度非常高 (双手张开 > 0.82)
-            if (isDoubleHands && avgOpenness > 0.82) {
-                targetCameraZ = 0.6; // 飞进球中央
-                penState.textContent = '🚀 已进入核心';
-                gestureState.textContent = '🚀 FLY-IN ACTIVE: 进入星云核心';
-            } else {
-                targetCameraZ = 15; // 退回外部
-                penState.textContent = isDoubleHands ? '双手模式' : '单手模式';
-            }
-
-            // 3. 挥手自转控制 (双手指左右挥动控制旋转)
-            // 以第一只手的食指坐标为计算依据
-            const leadHand = hands[0];
-            const wrist = leadHand[0];
-            const nowForGesture = performance.now();
-            const deltaTime = Math.max(16, nowForGesture - lastHandTimestamp);
-
-            let waveVelocity = 0;
-            if (lastHandX !== null) {
-                waveVelocity = (wrist.x - lastHandX) / deltaTime;
-            }
-            lastHandX = wrist.x;
-            lastHandTimestamp = nowForGesture;
-
-            smoothedWaveVelocity += (waveVelocity - smoothedWaveVelocity) * 0.35;
-            const waveDeadZone = 0.00035;
-            const effectiveWave = Math.abs(smoothedWaveVelocity) > waveDeadZone ? smoothedWaveVelocity : 0;
-            
-            // 挥手旋转速度放大
-            const mirroredDirection = -1;
-            targetRotationSpeedY = clamp(effectiveWave * 65 * mirroredDirection, -0.07, 0.07);
-
-            // 若无主动挥手，保持微微自转
-            if (Math.abs(targetRotationSpeedY) < 0.002) {
-                targetRotationSpeedY = 0.002;
-            }
-        }
-
-        // 骨骼层
         function drawSkeletonHud(hands, poseLandmarks) {
             hctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 
@@ -985,7 +747,6 @@
 
             latestHands = results.multiHandLandmarks || [];
 
-            if (currentMode === 'write') {
                 targetFrame = null;
                 colorFrame = null;
 
@@ -1006,17 +767,7 @@
                 } else {
                     gestureState.textContent = '等待手势输入';
                 }
-            } else {
-                updateNebulaInteraction(latestHands);
-                
-                if (latestHands.length >= 2) {
-                    gestureState.textContent = '双手检测中：完全张开双手飞进球内部！';
-                } else if (latestHands.length === 1) {
-                    gestureState.textContent = '单手控制：张开/握住调节星云大小';
-                } else {
-                    gestureState.textContent = '等待星云控制手势';
-                }
-            }
+
 
             drawSkeletonHud(latestHands, latestPoseLandmarks);
         }
@@ -1083,11 +834,9 @@
                 cameraState.textContent = 'ACTIVE';
                 overlay.style.display = 'none';
                 
-                // 启动所有系统
-                initThreeJS();
+                // 启动超长写字画布
                 resizeAll();
                 renderVideo();
-                animateThreeJS();
 
                 let processingHands = false;
                 let processingPose = false;
@@ -1133,3 +882,4 @@
     </script>
 </body>
 </html>
+
