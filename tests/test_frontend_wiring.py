@@ -166,6 +166,35 @@ def test_web_view_maps_single_finger_pointer_into_longzu_iframe():
     assert 'gesturePointerLabel.textContent = "单指聚焦";' in source
 
 
+def test_web_single_finger_focus_locks_target_for_thumb_confirm():
+    source = APP_JS.read_text(encoding="utf-8-sig")
+    assert "longzuLockedTarget: null" in source
+    assert "longzuLockedAt: 0" in source
+    assert "const LONGZU_FOCUS_LOCK_MS = 1500;" in source
+    assert "lockLongzuFocusTarget(target);" in source
+    assert "function lockLongzuFocusTarget(target)" in source
+    assert 'updateLongzuHint("已锁定目标，比赞确认");' in source
+    assert "function getValidLongzuLockedTarget()" in source
+    assert "Date.now() - state.longzuLockedAt > LONGZU_FOCUS_LOCK_MS" in source
+    assert "const lockedTarget = getValidLongzuLockedTarget();" in source
+    assert 'updateLongzuHint("正在打开锁定内容");' in source
+    assert "longzuHoverTarget" not in source
+    assert "LONGZU_HOVER_CLICK_MS" not in source
+
+
+def test_thumb_confirm_defaults_without_locked_target():
+    source = APP_JS.read_text(encoding="utf-8-sig")
+    open_block = source[source.index("function openActiveLongzuCharacter"):source.index("function zoomLongzuPage")]
+    assert "const lockedTarget = getValidLongzuLockedTarget();" in open_block
+    assert "lockedTarget.click();" in open_block
+    assert "state.longzuPointerTarget.matches" not in open_block
+    assert "focusedLink.click()" not in open_block
+    assert "if (cards.length)" in open_block
+    assert "cards[state.longzuCharacterIndex].click();" in open_block
+    assert 'const profile = longzuDocument.getElementById("profile");' in open_block
+    assert 'profile.scrollIntoView({ behavior: "smooth", block: "start" });' in open_block
+
+
 def test_single_finger_pointer_does_not_trigger_click():
     source = APP_JS.read_text(encoding="utf-8-sig")
     assert "point: \"click\"" not in source

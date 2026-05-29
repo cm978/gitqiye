@@ -2,6 +2,7 @@
 const TWO_FINGER_SAMPLE_LIMIT = 180;
 const ADAPTIVE_SWIPE_MIN_THRESHOLD = 0.14;
 const ADAPTIVE_SWIPE_MAX_THRESHOLD = 0.30;
+const LONGZU_FOCUS_LOCK_MS = 1500;
 
 const state = {
   stream: null,
@@ -31,6 +32,8 @@ const state = {
   longzuSectionIndex: 0,
   longzuCharacterIndex: 0,
   longzuPointerTarget: null,
+  longzuLockedTarget: null,
+  longzuLockedAt: 0,
   longzuZoom: 1,
 };
 
@@ -572,6 +575,7 @@ function setLongzuPointerFocus(target) {
   target.dataset.gesturePointerFocus = "true";
   target.style.outline = "2px solid rgba(66, 232, 255, 0.96)";
   target.style.boxShadow = "0 0 0 6px rgba(66, 232, 255, 0.14), 0 20px 60px rgba(0, 0, 0, 0.38)";
+  lockLongzuFocusTarget(target);
 
   const cards = getLongzuCharacterCards();
   const card = target.matches('a.card[href*="characters/"]') ? target : target.closest('a.card[href*="characters/"]');
@@ -580,8 +584,30 @@ function setLongzuPointerFocus(target) {
     state.longzuCharacterIndex = index;
     updateLongzuHint("单指已聚焦人物档案，确认手势打开");
   } else {
-    updateLongzuHint("单指移动聚焦，两指挥动滚动或切换");
+    updateLongzuHint("已锁定目标，比赞确认");
   }
+}
+
+function lockLongzuFocusTarget(target) {
+  const clickableTarget = getLongzuClickableTarget(target);
+  if (!clickableTarget) return;
+  state.longzuLockedTarget = clickableTarget;
+  state.longzuLockedAt = Date.now();
+  updateLongzuHint("已锁定目标，比赞确认");
+}
+
+function getLongzuClickableTarget(target) {
+  if (!target) return null;
+  return target.matches("a, button, [role='button']")
+    ? target
+    : target.closest("a, button, [role='button']");
+}
+
+function getValidLongzuLockedTarget() {
+  const target = state.longzuLockedTarget;
+  if (!target || !target.isConnected) return null;
+  if (Date.now() - state.longzuLockedAt > LONGZU_FOCUS_LOCK_MS) return null;
+  return target;
 }
 
 function clearLongzuPointerFocus() {
@@ -712,15 +738,11 @@ function openActiveLongzuCharacter() {
   if (!longzuDocument || !longzuWindow) return;
 
   const cards = getLongzuCharacterCards();
-  if (state.longzuPointerTarget && state.longzuPointerTarget.isConnected) {
-    const focusedLink = state.longzuPointerTarget.matches("a, button, [role='button']")
-      ? state.longzuPointerTarget
-      : state.longzuPointerTarget.closest("a, button, [role='button']");
-    if (focusedLink) {
-      focusedLink.click();
-      updateLongzuHint("正在打开单指聚焦内容");
-      return;
-    }
+  const lockedTarget = getValidLongzuLockedTarget();
+  if (lockedTarget) {
+    lockedTarget.click();
+    updateLongzuHint("正在打开锁定内容");
+    return;
   }
 
   if (cards.length) {
