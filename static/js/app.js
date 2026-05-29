@@ -3,6 +3,11 @@ const TWO_FINGER_SAMPLE_LIMIT = 180;
 const ADAPTIVE_SWIPE_MIN_THRESHOLD = 0.14;
 const ADAPTIVE_SWIPE_MAX_THRESHOLD = 0.30;
 const LONGZU_FOCUS_LOCK_MS = 1500;
+const MEDIA_TRACKS = [
+  { title: "Gesture Video 01", src: "/static/media/gesture-video-01.mp4" },
+  { title: "Gesture Video 02", src: "/static/media/gesture-video-02.mp4" },
+  { title: "Gesture Video 03", src: "/static/media/gesture-video-03.mp4" },
+];
 
 const state = {
   stream: null,
@@ -12,6 +17,7 @@ const state = {
   labels: [],
   mappings: {},
   slideIndex: 0,
+  mediaIndex: 0,
   volume: 50,
   playing: false,
   particleScene: null,
@@ -25,6 +31,17 @@ const state = {
   lastCalibrationHintAt: 0,
   twoFingerStroke: null,
   twoFingerMotionSamples: loadTwoFingerMotionSamples(),
+  mediaTwoFingerStroke: null,
+  mediaNeedsRelease: false,
+  mediaTouchState: "idle",
+  mediaTouchHoldMs: 140,
+  mediaSlideDetectDistance: 0.02,
+  mediaTwoFingerGraceMs: 220,
+  mediaStrokeMinDistance: 0.065,
+  mediaStrokeDominance: 1.08,
+  mediaMirrorHorizontal: true,
+  mediaGestureHint: "",
+  mediaGestureHintAt: 0,
   demoMode: true,
   sequenceLength: 16,
   predicting: false,
@@ -74,6 +91,9 @@ const confidence = document.getElementById("confidence");
 const actionName = document.getElementById("actionName");
 const triggerState = document.getElementById("triggerState");
 const historyBody = document.getElementById("historyBody");
+const trackName = document.getElementById("trackName");
+const playerState = document.getElementById("playerState");
+const volumeBar = document.getElementById("volumeBar");
 const mappingList = document.getElementById("mappingList");
 const modelStatus = document.getElementById("modelStatus");
 const collectLabel = document.getElementById("collectLabel");
@@ -85,6 +105,8 @@ const fpsPill = document.getElementById("fpsPill");
 const particleConfidence = document.getElementById("particleConfidence");
 const particleState = document.getElementById("particleState");
 const pageTitle = document.getElementById("pageTitle");
+const mediaPlayer = document.getElementById("mediaPlayer");
+const mediaGestureHint = document.getElementById("mediaGestureHint");
 const longzuFrame = document.getElementById("longzuFrame");
 const longzuGestureHint = document.getElementById("longzuGestureHint");
 const realtimePill = document.getElementById("realtimePill");
@@ -155,7 +177,7 @@ async function startRealtimeEngine() {
       video: camera,
       onSignal: handleRealtimeSignal,
       onStatus: ({ status }) => updateRealtimeStatus(status),
-      intervalMs: 100,
+      intervalMs: 60,
     });
   }
   try {
@@ -243,7 +265,7 @@ function handleRealtimeSignal(signal) {
     state.particleScene.updateHands(signal);
   }
   if (state.view === "recognition") return;
-  if (!action || !signal.triggered) return;
+  if (!action) return;
   triggerRealtimeAction(action, signal);
 }
 
@@ -260,6 +282,8 @@ function updateGesturePointer(signal, action) {
   gesturePointer.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`;
   if (singleFinger && state.view === "web") {
     gesturePointerLabel.textContent = "单指聚焦";
+  } else if (state.mode === "media" && state.mediaGestureHint && Date.now() - state.mediaGestureHintAt < 1200) {
+    gesturePointerLabel.textContent = state.mediaGestureHint;
   } else if (action) {
     gesturePointerLabel.textContent = `${twoFinger ? "两指" : "手势"} · ${getRealtimeActionLabel(action)}`;
   } else if (twoFinger) {
@@ -274,6 +298,16 @@ function updateGesturePointer(signal, action) {
 function mapRealtimeSignal(signal) {
   if (signal.handPose && signal.handPose.singleFingerPointer) return null;
   if (signal.handPose && signal.handPose.twoFingerNavigation) recordTwoFingerMotion(signal);
+  if (state.mode === "media") {
+    if (signal.handPose && signal.handPose.twoFingerNavigation) {
+      const mediaAction = mapMediaTwoFingerStrokeAction(signal);
+      return mediaAction;
+    }
+    handleMediaTwoFingerLost();
+    if (signal.gesture && signal.gesture.startsWith("swipe_")) return null;
+    if (!isStaticRealtimeGesture(signal)) return null;
+    return REALTIME_ACTIONS[signal.gesture] || null;
+  }
   if (signal.gesture && signal.gesture.startsWith("swipe_")) {
     state.lastStaticGesture = null;
     state.lastStaticGestureAt = 0;
@@ -368,6 +402,163 @@ function mapWebTwoFingerScrollAction(action, signal) {
   if (!action) return null;
   if (action !== "swipe_up") return null;
   return isLeftHandSignal(signal) ? "swipe_down" : "swipe_up";
+}
+
+function mapMediaTwoFingerStrokeAction(signal) {
+  const now = Date.now();
+  if (state.mediaNeedsRelease) {
+    updateMediaGestureHint("松开两指后可继续");
+    return null;
+  }
+
+  const point = signal.pointer || signal.center;
+  if (!point) return null;
+  let stroke = state.mediaTwoFingerStroke;
+  if (!stroke || now - stroke.lastAt > state.mediaTwoFingerGraceMs) {
+    state.mediaTwoFingerStroke = {
+      phase: "holding",
+      startedAt: now,
+      lastAt: now,
+      holdX: point.x,
+      holdY: point.y,
+      startX: point.x,
+      startY: point.y,
+      endX: point.x,
+      endY: point.y,
+      minX: point.x,
+      maxX: point.x,
+      minY: point.y,
+      maxY: point.y,
+      maxMotion: 0,
+      points: [{ x: point.x, y: point.y, at: now }],
+    };
+    state.mediaTouchState = "holding";
+    updateMediaDragPreview(0, true);
+    updateMediaGestureHint("两指停留选中");
+    return null;
+  }
+
+  stroke.lastAt = now;
+  stroke.endX = point.x;
+  stroke.endY = point.y;
+  stroke.minX = Math.min(stroke.minX, point.x);
+  stroke.maxX = Math.max(stroke.maxX, point.x);
+  stroke.minY = Math.min(stroke.minY, point.y);
+  stroke.maxY = Math.max(stroke.maxY, point.y);
+  stroke.maxMotion = Math.max(stroke.maxMotion, signal.motion || 0);
+  stroke.points.push({ x: point.x, y: point.y, at: now });
+  stroke.points = stroke.points.slice(-18);
+
+  const age = now - stroke.startedAt;
+  const dx = stroke.endX - stroke.startX;
+  const dy = stroke.endY - stroke.startY;
+
+  if (stroke.phase === "holding") {
+    if (age < state.mediaTouchHoldMs) {
+      updateMediaGestureHint("两指停留选中");
+      return null;
+    }
+    stroke.phase = "locked";
+    stroke.startX = point.x;
+    stroke.startY = point.y;
+    stroke.minX = point.x;
+    stroke.maxX = point.x;
+    stroke.minY = point.y;
+    stroke.maxY = point.y;
+    state.mediaTouchState = "locked";
+    updateMediaDragPreview(0, true);
+    updateMediaGestureHint("已锁定，左右滑动切视频");
+    return null;
+  }
+
+  if (stroke.phase !== "locked") return null;
+  const visualDx = state.mediaMirrorHorizontal ? -dx : dx;
+  updateMediaDragPreview(0, true);
+
+  if (Math.abs(dx) < state.mediaSlideDetectDistance) return null;
+  if (Math.abs(dx) <= Math.abs(dy) * state.mediaStrokeDominance) {
+    updateMediaGestureHint("请左右拖动切视频");
+    return null;
+  }
+
+  const direction = visualDx > 0 ? "swipe_right" : "swipe_left";
+  if (!direction) return null;
+  return commitMediaDrag(direction);
+}
+
+function handleMediaTwoFingerLost() {
+  const stroke = state.mediaTwoFingerStroke;
+  if (!stroke) {
+    state.mediaNeedsRelease = false;
+    return;
+  }
+  if (Date.now() - stroke.lastAt <= state.mediaTwoFingerGraceMs) {
+    updateMediaGestureHint(state.mediaNeedsRelease ? "松开两指后可继续" : "保持锁定中");
+    return;
+  }
+  resetMediaTwoFingerStroke();
+}
+
+function resetMediaTwoFingerStroke() {
+  state.mediaTwoFingerStroke = null;
+  state.mediaTouchState = "idle";
+  state.mediaNeedsRelease = false;
+  updateMediaDragPreview(0, false);
+}
+
+function getMediaStrokeDirection(stroke) {
+  if (!stroke) return null;
+  const right = stroke.maxX - stroke.startX;
+  const left = stroke.startX - stroke.minX;
+  const rightAction = state.mediaMirrorHorizontal ? "swipe_left" : "swipe_right";
+  const leftAction = state.mediaMirrorHorizontal ? "swipe_right" : "swipe_left";
+  const down = stroke.maxY - stroke.startY;
+  const up = stroke.startY - stroke.minY;
+  const horizontal = [
+    { action: rightAction, amount: right },
+    { action: leftAction, amount: left },
+  ].sort((a, b) => b.amount - a.amount)[0];
+  const vertical = [
+    { amount: down },
+    { amount: up },
+  ].sort((a, b) => b.amount - a.amount)[0];
+  if (vertical.amount >= state.mediaStrokeMinDistance && vertical.amount > horizontal.amount) {
+    updateMediaGestureHint("媒体页只识别左右滑动");
+    return null;
+  }
+  if (horizontal.amount < state.mediaStrokeMinDistance) return null;
+  if (horizontal.amount < vertical.amount * state.mediaStrokeDominance) return null;
+  return horizontal.action;
+}
+
+function updateMediaDragPreview(offset, selected = false) {
+  const clamped = clampValue(offset, -0.34, 0.34);
+  if (mediaPlayer) {
+    mediaPlayer.style.transform = `translate3d(${clamped * 82}%, 0, 0) scale(${selected ? 0.985 : 1})`;
+    mediaPlayer.style.opacity = String(1 - Math.abs(clamped) * 0.28);
+    mediaPlayer.dataset.selected = selected ? "true" : "false";
+  }
+  const mediaScreen = mediaPlayer ? mediaPlayer.closest(".media-screen") : null;
+  if (mediaScreen) {
+    mediaScreen.dataset.selected = selected ? "true" : "false";
+    mediaScreen.dataset.dragging = Math.abs(clamped) > 0.02 ? "true" : "false";
+  }
+}
+
+function commitMediaDrag(action) {
+  const direction = action === "swipe_right" ? 1 : -1;
+  state.mediaTouchState = "committed";
+  state.mediaNeedsRelease = true;
+  updateMediaDragPreview(direction === 1 ? 1 : -1, true);
+  updateMediaGestureHint("已识别，正在切换视频");
+  setTimeout(() => updateMediaDragPreview(0, true), 180);
+  return action;
+}
+
+function updateMediaGestureHint(message) {
+  state.mediaGestureHint = message;
+  state.mediaGestureHintAt = Date.now();
+  if (mediaGestureHint) mediaGestureHint.textContent = message;
 }
 
 function isLeftHandSignal(signal) {
@@ -784,18 +975,44 @@ function updateLongzuHint(message) {
 }
 
 function applyMediaAction(gesture) {
-  const tracks = ["Gesture Track 01", "Gesture Track 02", "Gesture Track 03"];
-  let current = tracks.indexOf(document.getElementById("trackName").textContent);
-  if (gesture === "swipe_left") current = (current + tracks.length - 1) % tracks.length;
-  if (gesture === "swipe_right") current = (current + 1) % tracks.length;
-  if (gesture === "swipe_up") state.volume = Math.min(100, state.volume + 10);
-  if (gesture === "swipe_down") state.volume = Math.max(0, state.volume - 10);
-  if (gesture === "zoom_in") state.volume = Math.min(100, state.volume + 5);
-  if (gesture === "zoom_out") state.volume = Math.max(0, state.volume - 5);
-  if (gesture === "click") state.playing = !state.playing;
-  document.getElementById("trackName").textContent = tracks[current];
-  document.getElementById("playerState").textContent = state.playing ? "播放中" : "暂停";
-  document.getElementById("volumeBar").value = state.volume;
+  if (gesture === "swipe_right") switchMediaTrack(1);
+  if (gesture === "swipe_left") switchMediaTrack(-1);
+  if (gesture === "zoom_in") state.volume = Math.min(100, state.volume + 10);
+  if (gesture === "zoom_out") state.volume = Math.max(0, state.volume - 10);
+  if (gesture === "click") toggleMediaPlayback();
+  renderMediaTrack();
+  if (gesture === "zoom_in" || gesture === "zoom_out") updateMediaGestureHint(`音量 ${state.volume}%`);
+}
+
+function switchMediaTrack(direction) {
+  state.mediaIndex = wrapIndex(state.mediaIndex + direction, MEDIA_TRACKS.length);
+  renderMediaTrack(state.playing);
+  const track = MEDIA_TRACKS[state.mediaIndex] || MEDIA_TRACKS[0];
+  updateMediaGestureHint(`已切换：${track.title}`);
+}
+
+function toggleMediaPlayback() {
+  if (!mediaPlayer) return;
+  state.playing = !state.playing;
+  if (state.playing) {
+    mediaPlayer.play();
+  } else {
+    mediaPlayer.pause();
+  }
+}
+
+function renderMediaTrack(shouldContinuePlaying = state.playing) {
+  const track = MEDIA_TRACKS[state.mediaIndex] || MEDIA_TRACKS[0];
+  if (!track) return;
+  if (mediaPlayer && mediaPlayer.getAttribute("src") !== track.src) {
+    mediaPlayer.src = track.src;
+    mediaPlayer.load();
+  }
+  mediaPlayer.volume = state.volume / 100;
+  trackName.textContent = track.title;
+  playerState.textContent = state.playing ? "播放中" : "暂停";
+  volumeBar.value = state.volume;
+  if (shouldContinuePlaying && mediaPlayer) mediaPlayer.play();
 }
 
 async function collectSample() {
@@ -880,6 +1097,7 @@ document.querySelectorAll(".nav-item").forEach((button) => {
 
 window.addEventListener("load", async () => {
   state.particleScene = window.createParticleScene(document.getElementById("particleCanvas"));
+  renderMediaTrack(false);
   await loadStatus();
   startCamera().then(startRealtimeEngine).catch(() => updateRealtimeStatus("error"));
   captureLoop();

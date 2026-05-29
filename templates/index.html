@@ -130,15 +130,18 @@
           <div class="module-copy">
             <span class="eyebrow">Realtime Media Control</span>
             <h2>媒体控制</h2>
-            <p>左右切歌，上下调节音量，点击切换播放状态。</p>
+            <p>两指停留锁定后左右滑动切视频，张开手掌和握拳调节音量。</p>
           </div>
           <div id="mediaMode" class="mode-view">
             <div class="player">
-              <div class="album-art"><div class="pulse-disc"></div></div>
+              <div class="media-screen">
+                <video id="mediaPlayer" playsinline preload="metadata"></video>
+              </div>
               <div class="player-meta">
-                <span>Gesture Track</span>
-                <h3 id="trackName">Gesture Track 01</h3>
+                <span>Gesture Video</span>
+                <h3 id="trackName">Gesture Video 01</h3>
                 <p id="playerState">暂停</p>
+                <p id="mediaGestureHint" class="media-gesture-hint">两指左右滑动切视频</p>
                 <div class="volume"><span>音量</span><progress id="volumeBar" max="100" value="50"></progress></div>
               </div>
             </div>
@@ -228,6 +231,6 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="{{ url_for('static', filename='js/realtime_gestures.js', v='8') }}"></script>
   <script src="{{ url_for('static', filename='js/particles.js', v='38') }}"></script>
-  <script src="{{ url_for('static', filename='js/app.js', v='53') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js', v='62') }}"></script>
 </body>
 </html>
