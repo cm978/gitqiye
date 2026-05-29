@@ -1,0 +1,10 @@
+[
+  "no_gesture",
+  "swipe_left",
+  "swipe_right",
+  "swipe_up",
+  "swipe_down",
+  "click",
+  "zoom_in",
+  "zoom_out"
+]
