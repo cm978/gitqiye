@@ -12,6 +12,11 @@ def index():
     return render_template("index.html")
 
 
+@pages_bp.get("/canvas-v4/")
+def canvas_v4():
+    return render_template("canvas_v4.html")
+
+
 @pages_bp.get("/longzu-site/")
 def longzu_index():
     return send_from_directory(LONGZU_SITE_DIR, "index.html")

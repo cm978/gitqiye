@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>量子全息手势控制终端 v4</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- MediaPipe Hands -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <!-- MediaPipe Pose -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #010206;
+            font-family: 'Share Tech Mono', monospace, "Microsoft YaHei";
+            color: #7dd3fc;
+        }
+
+        #webcam {
+            position: fixed;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        canvas {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #webgl-canvas { z-index: 0; transition: opacity 0.5s ease; }
+        #video-canvas { z-index: 1; transition: opacity 0.5s ease; }
+        #draw-canvas { z-index: 2; pointer-events: none; }
+        #hud-canvas { z-index: 3; pointer-events: none; }
+
+        .panel {
+            background: rgba(2, 6, 23, 0.85);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            box-shadow: inset 0 0 24px rgba(14, 165, 233, 0.1), 0 0 28px rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(14px);
+        }
+
+        .tab-button {
+            width: 100%;
+            text-align: left;
+            padding: 10px 12px;
+            border: 1px solid rgba(56, 189, 248, 0.14);
+            background: rgba(15, 23, 42, 0.55);
+            color: rgba(125, 211, 252, 0.72);
+            transition: all 0.2s ease;
+        }
+
+        .tab-button.active {
+            color: #e0f2fe;
+            border-color: rgba(56, 189, 248, 0.55);
+            background: linear-gradient(90deg, rgba(2, 132, 199, 0.34), rgba(15, 23, 42, 0.72));
+            box-shadow: 0 0 18px rgba(56, 189, 248, 0.18);
+        }
+
+        /* 侧边栏隐藏/展开动画 */
+        #sidebar-container {
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        #sidebar-container.collapsed {
+            transform: translateX(-290px);
+        }
+
+        .corner::before,
+        .corner::after {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            border-color: #38bdf8;
+        }
+
+        .corner::before {
+            left: -1px;
+            top: -1px;
+            border-left: 2px solid;
+            border-top: 2px solid;
+        }
+
+        .corner::after {
+            right: -1px;
+            bottom: -1px;
+            border-right: 2px solid;
+            border-bottom: 2px solid;
+        }
+    </style>
+</head>
+<body>
+    <video id="webcam" playsinline autoplay muted></video>
+    <canvas id="webgl-canvas"></canvas>
+    <canvas id="video-canvas"></canvas>
+    <canvas id="draw-canvas"></canvas>
+    <canvas id="hud-canvas"></canvas>
+
+    <!-- 浮空页面滑动提示层 -->
+    <div id="swipe-alert" class="fixed top-1/4 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-40 bg-sky-950/90 border border-sky-400/50 text-sky-200 px-6 py-4 rounded-xl font-bold tracking-widest pointer-events-none opacity-0 transition-all duration-300 scale-95 flex flex-col items-center gap-2 shadow-2xl">
+        <span class="text-xl" id="swipe-alert-text">PAGE SWIPE</span>
+        <span class="text-[10px] text-sky-400" id="swipe-page-text">PAGE 01</span>
+    </div>
+
+    <!-- UI Overlay (非穿透) -->
+    <div class="fixed inset-0 z-10 pointer-events-none p-5 flex justify-between">
+        
+        <!-- 侧边栏容器 (包含折叠逻辑) -->
+        <div id="sidebar-container" class="relative pointer-events-auto w-72 h-fit">
+            <aside class="panel corner w-full h-fit p-4 rounded-xl space-y-4">
+                <div>
+                    <h1 class="text-lg font-black tracking-widest text-sky-300">QUANTUM TERMINAL</h1>
+                    <p class="text-[10px] text-sky-600 mt-1">MULTIPLE GESTURE MODES v4.0</p>
+                </div>
+
+                <!-- 模式切换 -->
+                <div class="space-y-2">
+                    <div class="text-[11px] text-sky-500 border-b border-sky-900/60 pb-1">操作模式 / OPERATION MODE</div>
+                    <button class="tab-button active rounded-lg" data-mode="write">模式A / 超长写字画布</button>
+                    <button class="tab-button rounded-lg" data-mode="nebula">模式B / 量子星云球</button>
+                </div>
+
+                <!-- 效果选项卡 (仅在模式A展示) -->
+                <div id="effect-select-panel" class="hidden space-y-2">
+                    <div class="text-[11px] text-sky-500 border-b border-sky-900/60 pb-1">显示效果 / VISUAL FILTER</div>
+                    <button class="effect-tab-button tab-button active rounded-lg text-xs" data-effect="holo">01 / 深色全息</button>
+                    <button class="effect-tab-button tab-button rounded-lg text-xs" data-effect="ink">02 / 水墨暗影</button>
+                    <button class="effect-tab-button tab-button rounded-lg text-xs" data-effect="edge">03 / 蓝色边缘</button>
+                    <button class="effect-tab-button tab-button rounded-lg text-xs" data-effect="thermal">04 / 热成像</button>
+                </div>
+
+                <!-- 状态监测 -->
+                <div class="space-y-2 text-xs">
+                    <div class="text-[11px] text-sky-500 border-b border-sky-900/60 pb-1">系统监测 / PARAMETERS</div>
+                    <div class="flex justify-between"><span class="text-sky-600">CAMERA:</span><span id="camera-state" class="text-emerald-400">WAITING</span></div>
+                    <div class="flex justify-between"><span class="text-sky-600">MODE:</span><span id="mode-state" class="text-sky-300 font-bold">A / 写字画布</span></div>
+                    <div class="flex justify-between"><span class="text-sky-600">PAGE / SCALE:</span><span id="frame-state" class="text-sky-300">PAGE 01</span></div>
+                    <div class="flex justify-between"><span class="text-sky-600">PEN / FLIGHT:</span><span id="pen-state" class="text-sky-300">等待右手</span></div>
+                    <div class="flex justify-between"><span class="text-sky-600">FPS:</span><span id="fps-state" class="text-sky-300">--</span></div>
+                </div>
+
+                <div class="space-y-2">
+                    <button id="start-camera-btn" class="w-full px-3 py-2 rounded-lg border border-sky-400/40 bg-sky-950/50 text-sky-100 text-xs hover:bg-sky-900 transition">启动摄像头</button>
+                    <button id="write-toggle-btn" class="hidden w-full px-3 py-2 rounded-lg border border-sky-400/30 bg-slate-950/60 text-sky-300 text-xs hover:bg-sky-950/70 transition">开启书写模式</button>
+                    <button id="clear-btn" class="w-full px-3 py-2 rounded-lg border border-rose-400/40 bg-rose-950/30 text-rose-200 text-xs hover:bg-rose-900/70 transition">清除画迹</button>
+                </div>
+            </aside>
+
+            <!-- 侧边栏折叠把手 -->
+            <button id="sidebar-toggle-btn" class="absolute top-1/2 -right-10 transform -translate-y-1/2 p-2.5 rounded-r-xl border-t border-b border-r border-sky-400/25 bg-slate-950/90 text-sky-400 pointer-events-auto hover:bg-sky-900 transition flex items-center justify-center">
+                <span id="toggle-icon" class="text-sm font-bold">◀</span>
+            </button>
+        </div>
+
+        <!-- 右侧手势状态面板 -->
+        <div class="panel corner relative h-fit p-4 rounded-xl text-[11px] text-sky-500 hidden md:block">
+            <div class="text-sky-300 font-bold tracking-widest mb-1.5">[ GESTURE STATS ]</div>
+            <div id="gesture-state" class="text-sky-400 font-bold">等待手势输入</div>
+            <div id="protocol-desc" class="mt-3 text-[10px] text-sky-500/80 leading-relaxed max-w-xs border-t border-sky-900/60 pt-2 space-y-1">
+                <p class="font-bold text-sky-300">模式A (写字画布) 协议：</p>
+                <p>右手捏合: 凌空书写/抬笔。</p>
+                <p>左手挥动: 推动画布翻页。</p>
+                <p>左手捏合/握拳: 切换画笔颜色。</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 启动摄像头覆盖层 -->
+    <div id="camera-overlay" class="fixed inset-0 z-20 flex items-center justify-center bg-black/90 text-center text-sky-400 p-8">
+        <div class="panel corner relative p-8 rounded-xl max-w-md">
+            <div class="text-xl font-bold tracking-widest text-sky-300">全息摄像头就绪</div>
+            <p class="text-sm text-sky-600 mt-3 leading-relaxed">系统已经更新到 v4 多模式版本。请使用本地环回地址访问并允许摄像头权限。</p>
+            <button id="overlay-start-btn" class="mt-6 px-5 py-2 rounded-lg border border-sky-400/50 bg-sky-950/70 text-sky-100 hover:bg-sky-900 transition">启动摄像头</button>
+            <div id="camera-error" class="mt-4 text-xs text-rose-300"></div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const videoCanvas = document.getElementById('video-canvas');
+        const drawCanvas = document.getElementById('draw-canvas');
+        const hudCanvas = document.getElementById('hud-canvas');
+        const webglCanvas = document.getElementById('webgl-canvas');
+        
+        const vctx = videoCanvas.getContext('2d');
+        const dctx = drawCanvas.getContext('2d');
+        const hctx = hudCanvas.getContext('2d');
+
+        // UI 元素
+        const overlay = document.getElementById('camera-overlay');
+        const cameraError = document.getElementById('camera-error');
+        const startBtn = document.getElementById('start-camera-btn');
+        const overlayStartBtn = document.getElementById('overlay-start-btn');
+        const clearBtn = document.getElementById('clear-btn');
+        const writeToggleBtn = document.getElementById('write-toggle-btn');
+        
+        const cameraState = document.getElementById('camera-state');
+        const modeState = document.getElementById('mode-state');
+        const frameState = document.getElementById('frame-state');
+        const penState = document.getElementById('pen-state');
+        const fpsState = document.getElementById('fps-state');
+        const gestureState = document.getElementById('gesture-state');
+        const protocolDesc = document.getElementById('protocol-desc');
+        const effectSelectPanel = document.getElementById('effect-select-panel');
+
+        // 侧边栏折叠
+        const sidebarContainer = document.getElementById('sidebar-container');
+        const sidebarToggleBtn = document.getElementById('sidebar-toggle-btn');
+        const toggleIcon = document.getElementById('toggle-icon');
+
+        sidebarToggleBtn.addEventListener('click', () => {
+            const collapsed = sidebarContainer.classList.toggle('collapsed');
+            toggleIcon.textContent = collapsed ? '▶' : '◀';
+        });
+
+        // 状态变量
+        let currentMode = 'write'; // 'write' or 'nebula'
+        let currentEffect = 'holo';
+        let cameraStarted = false;
+        let latestHands = [];
+        let latestPoseLandmarks = null;
+        let colorFrame = null;
+        let targetFrame = null;
+        
+        let writingEnabled = true;
+        let isDrawing = false;
+        let lastPen = null;
+
+        // 超长画布与挥手滑动页逻辑
+        let canvasOffsetX = 0;
+        let targetCanvasOffsetX = 0;
+        let currentPage = 1;
+        const virtualPageCount = 12;
+        let swipeCooldown = false;
+        let lastLeftWristX = null;
+        let lastLeftWristTime = null;
+        let canvasVelocity = 0;
+        let colorSwitchCooldown = false;
+        let leftControlWasClosed = false;
+        let leftFistTapCount = 0;
+        let firstLeftFistTime = 0;
+
+        // 捏合去抖缓冲区与自适应墨水色彩
+        let globalPinchBuffer = [];
+        const inkPalette = [
+            { name: '青蓝 CYAN', color: '#22d3ee', shadow: '#06b6d4' },
+            { name: '霓虹红 RED', color: '#f43f5e', shadow: '#e11d48' },
+            { name: '荧光绿 GREEN', color: '#34d399', shadow: '#10b981' },
+            { name: '能量紫 PURPLE', color: '#a78bfa', shadow: '#8b5cf6' },
+            { name: '金色 GOLD', color: '#facc15', shadow: '#eab308' }
+        ];
+        let inkColorIndex = 0;
+        let inkColor = inkPalette[inkColorIndex].color;
+        let inkShadowColor = inkPalette[inkColorIndex].shadow;
+
+        // 浮空滑动页弹窗
+        const swipeAlert = document.getElementById('swipe-alert');
+        const swipeAlertText = document.getElementById('swipe-alert-text');
+        const swipePageText = document.getElementById('swipe-page-text');
+
+        function triggerSwipeAlert(direction) {
+            swipeAlertText.textContent = direction === 'LEFT' ? '画布向左滑动' : '画布向右滑动';
+            swipePageText.textContent = `OFFSET ${Math.round(Math.abs(targetCanvasOffsetX))}px`;
+            swipeAlert.style.opacity = '1';
+            swipeAlert.style.transform = 'translate(-50%, -50%) scale(1.05)';
+            
+            // 边缘发光视觉抖动
+            videoCanvas.style.boxShadow = direction === 'LEFT' 
+                ? 'inset 0 0 100px rgba(34,211,238,0.5)' 
+                : 'inset 0 0 100px rgba(239,68,68,0.5)';
+            setTimeout(() => {
+                videoCanvas.style.boxShadow = 'none';
+            }, 600);
+
+            setTimeout(() => {
+                swipeAlert.style.opacity = '0';
+                swipeAlert.style.transform = 'translate(-50%, -50%) scale(0.95)';
+            }, 900);
+        }
+
+        function triggerColorAlert() {
+            const current = inkPalette[inkColorIndex];
+            swipeAlertText.textContent = `颜色切换：${current.name}`;
+            swipePageText.textContent = '左手连续握拳两次触发';
+            swipeAlert.style.borderColor = current.color;
+            swipeAlert.style.color = current.color;
+            swipeAlert.style.opacity = '1';
+            swipeAlert.style.transform = 'translate(-50%, -50%) scale(1.05)';
+            setTimeout(() => {
+                swipeAlert.style.opacity = '0';
+                swipeAlert.style.transform = 'translate(-50%, -50%) scale(0.95)';
+            }, 1000);
+        }
+
+        function switchInkColor() {
+            inkColorIndex = (inkColorIndex + 1) % inkPalette.length;
+            inkColor = inkPalette[inkColorIndex].color;
+            inkShadowColor = inkPalette[inkColorIndex].shadow;
+            triggerColorAlert();
+        }
+        
+        let frameCount = 0;
+        let fpsStart = performance.now();
+
+        // 缩放适应
+        function resizeAll() {
+            const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+            [videoCanvas, hudCanvas].forEach(canvas => {
+                canvas.width = Math.floor(window.innerWidth * dpr);
+                canvas.height = Math.floor(window.innerHeight * dpr);
+                canvas.style.width = `${window.innerWidth}px`;
+                canvas.style.height = `${window.innerHeight}px`;
+                const ctx = canvas.getContext('2d');
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            });
+
+            const drawDpr = 1;
+            const virtualWidth = window.innerWidth * virtualPageCount;
+            drawCanvas.width = Math.floor(virtualWidth * drawDpr);
+            drawCanvas.height = Math.floor(window.innerHeight * drawDpr);
+            drawCanvas.style.width = `${virtualWidth}px`;
+            drawCanvas.style.height = `${window.innerHeight}px`;
+            dctx.setTransform(drawDpr, 0, 0, drawDpr, 0, 0);
+            dctx.lineCap = 'round';
+            dctx.lineJoin = 'round';
+
+            if (renderer) {
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                camera3D.aspect = window.innerWidth / window.innerHeight;
+                camera3D.updateProjectionMatrix();
+            }
+        }
+        window.addEventListener('resize', resizeAll);
+
+        // ==========================================
+        // THREE.JS 引擎初始化 (模式B 量子星云)
+        // ==========================================
+        let scene, camera3D, renderer, particleSphere;
+        const particleCount = 4500;
+        const sphereRadius = 6.0;
+
+        let currentRotationSpeedY = 0;
+        let targetRotationSpeedY = 0;
+        let currentSphereScale = 1.0;
+        let targetSphereScale = 1.0;
+        let targetCameraZ = 15;
+        let currentCameraZ = 15;
+
+        let lastHandX = null;
+        let lastHandTimestamp = performance.now();
+        let smoothedWaveVelocity = 0;
+
+        function initThreeJS() {
+            scene = new THREE.Scene();
+            camera3D = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera3D.position.z = 15;
+
+            renderer = new THREE.WebGLRenderer({ canvas: webglCanvas, antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setClearColor(0x000000, 0);
+
+            // 创建量子星云粒子球
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+            const colors = new Float32Array(particleCount * 3);
+
+            for (let i = 0; i < particleCount; i++) {
+                const phi = Math.acos(-1 + (2 * i) / particleCount);
+                const theta = Math.sqrt(particleCount * Math.PI) * phi;
+
+                const dist = sphereRadius + (Math.random() - 0.5) * 1.8;
+                positions[i * 3] = dist * Math.cos(theta) * Math.sin(phi);
+                positions[i * 3 + 1] = dist * Math.sin(theta) * Math.sin(phi);
+                positions[i * 3 + 2] = dist * Math.cos(phi);
+
+                // 星云配色（霓虹蓝、粉）
+                const ratio = i / particleCount;
+                colors[i * 3] = ratio > 0.5 ? 0.0 : 0.95;       // R
+                colors[i * 3 + 1] = ratio > 0.5 ? 0.72 : 0.15;  // G
+                colors[i * 3 + 2] = 1.0;                        // B
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            function createParticleTexture() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 16; canvas.height = 16;
+                const ctx = canvas.getContext('2d');
+                const grad = ctx.createRadialGradient(8, 8, 0, 8, 8, 8);
+                grad.addColorStop(0, 'rgba(255,255,255,1)');
+                grad.addColorStop(0.3, 'rgba(0,192,255,0.75)');
+                grad.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, 16, 16);
+                return new THREE.CanvasTexture(canvas);
+            }
+
+            const material = new THREE.PointsMaterial({
+                size: 0.22,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.9,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                map: createParticleTexture()
+            });
+
+            particleSphere = new THREE.Points(geometry, material);
+            scene.add(particleSphere);
+        }
+
+        function animateThreeJS() {
+            requestAnimationFrame(animateThreeJS);
+            if (currentMode !== 'nebula') return;
+
+            // 平滑旋转
+            currentRotationSpeedY += (targetRotationSpeedY - currentRotationSpeedY) * 0.08;
+            particleSphere.rotation.y += currentRotationSpeedY;
+            particleSphere.rotation.x += 0.001; // 微弱自转
+
+            // 平滑缩放
+            currentSphereScale += (targetSphereScale - currentSphereScale) * 0.08;
+            particleSphere.scale.set(currentSphereScale, currentSphereScale, currentSphereScale);
+
+            // 镜头推进动画 (双手大张开时进入球内部)
+            currentCameraZ += (targetCameraZ - currentCameraZ) * 0.08;
+            camera3D.position.z = currentCameraZ;
+
+            // 微弱旋转抖动增强内部沉浸感
+            if (currentCameraZ < 5) {
+                camera3D.rotation.y = Math.sin(performance.now() * 0.0015) * 0.05;
+                camera3D.rotation.x = Math.cos(performance.now() * 0.001) * 0.05;
+            } else {
+                camera3D.rotation.set(0, 0, 0);
+            }
+
+            renderer.render(scene, camera3D);
+        }
+
+        // ==========================================
+        // 模式切换与选项卡逻辑
+        // ==========================================
+        document.querySelectorAll('[data-mode]').forEach(button => {
+            button.addEventListener('click', () => {
+                document.querySelectorAll('[data-mode]').forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+                
+                currentMode = button.dataset.mode;
+                isDrawing = false;
+                lastPen = null;
+
+                if (currentMode === 'write') {
+                    modeState.textContent = 'A / 写字画布';
+                    effectSelectPanel.style.display = 'none';
+                    writeToggleBtn.style.display = 'none';
+                    clearBtn.style.display = 'block';
+                    webglCanvas.style.opacity = '0';
+                    videoCanvas.style.opacity = '1';
+                    colorFrame = null;
+                    targetFrame = null;
+                    
+                    protocolDesc.innerHTML = `
+                        <p class="font-bold text-sky-300">模式A (写字画布) 协议：</p>
+                        <p>右手捏合: 写字。</p>
+                        <p>左手挥动: 推动画布翻页。</p>
+                        <p>左手捏合/握拳: 切换颜色。</p>
+                        <p>身体骨骼: 粉紫霓虹追踪。</p>
+                    `;
+                } else {
+                    modeState.textContent = 'B / 量子星云';
+                    effectSelectPanel.style.display = 'none';
+                    writeToggleBtn.style.display = 'none';
+                    clearBtn.style.display = 'none';
+                    webglCanvas.style.opacity = '1';
+                    // 模式B中人像透明度减弱，作为背景辅助
+                    videoCanvas.style.opacity = '0.22';
+                    
+                    // 重置3D缩放
+                    targetSphereScale = 1.0;
+                    targetCameraZ = 15;
+
+                    protocolDesc.innerHTML = `
+                        <p class="font-bold text-sky-300">模式B (量子星云) 协议：</p>
+                        <p>🖐️ 双手张开: 量子星云球放大。</p>
+                        <p>✊ 双手握拳: 粒子球缩紧减小。</p>
+                        <p>↔️ 双指挥动: 星云球左右旋转。</p>
+                        <p>🚀 双手极大张开: <b>推进进入粒子球内部！</b></p>
+                    `;
+                }
+            });
+        });
+
+        // 滤镜切换
+        document.querySelectorAll('[data-effect]').forEach(button => {
+            button.addEventListener('click', () => {
+                document.querySelectorAll('[data-effect]').forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+                currentEffect = button.dataset.effect;
+            });
+        });
+
+        clearBtn.addEventListener('click', () => {
+            dctx.clearRect(0, 0, window.innerWidth * virtualPageCount, window.innerHeight);
+        });
+
+        writeToggleBtn.addEventListener('click', () => {
+            writingEnabled = !writingEnabled;
+            isDrawing = false;
+            lastPen = null;
+            writeToggleBtn.textContent = writingEnabled ? '关闭书写模式' : '开启书写模式';
+            writeToggleBtn.className = writingEnabled
+                ? 'w-full px-3 py-2 rounded-lg border border-emerald-400/40 bg-emerald-950/40 text-emerald-200 text-xs hover:bg-emerald-900/60 transition'
+                : 'w-full px-3 py-2 rounded-lg border border-sky-400/30 bg-slate-950/60 text-sky-300 text-xs hover:bg-sky-950/70 transition';
+            penState.textContent = writingEnabled ? '已开启 / 抬起' : '关闭';
+        });
+
+        // ==========================================
+        // 核心手势处理逻辑
+        // ==========================================
+        function getVideoDrawRect() {
+            const cw = window.innerWidth;
+            const ch = window.innerHeight;
+            const vw = video.videoWidth || 640;
+            const vh = video.videoHeight || 480;
+            const scale = Math.max(cw / vw, ch / vh);
+            const w = vw * scale;
+            const h = vh * scale;
+            return { x: (cw - w) / 2, y: (ch - h) / 2, w, h };
+        }
+
+        function pointToScreen(point) {
+            const rect = getVideoDrawRect();
+            return {
+                x: rect.x + (1 - point.x) * rect.w,
+                y: rect.y + point.y * rect.h
+            };
+        }
+
+        function drawMirroredVideo(ctx, filter = 'none') {
+            const rect = getVideoDrawRect();
+            ctx.save();
+            ctx.filter = filter;
+            ctx.translate(rect.x + rect.w, rect.y);
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, 0, 0, rect.w, rect.h);
+            ctx.restore();
+            ctx.filter = 'none';
+        }
+
+        function getFilter() {
+            if (currentEffect === 'ink') return 'grayscale(1) contrast(1.8) brightness(0.42) sepia(0.35) hue-rotate(170deg)';
+            if (currentEffect === 'edge') return 'grayscale(1) contrast(2.2) brightness(0.36) saturate(2) hue-rotate(170deg)';
+            if (currentEffect === 'thermal') return 'grayscale(1) contrast(1.8) brightness(0.5) sepia(1) hue-rotate(185deg) saturate(3)';
+            return 'grayscale(1) contrast(1.55) brightness(0.48) sepia(0.5) hue-rotate(170deg) saturate(1.5)';
+        }
+
+        function analyzeOpen(hand) {
+            const wrist = hand[0];
+            const tips = [8, 12, 16, 20];
+            const mcps = [5, 9, 13, 17];
+            let total = 0;
+            let open = 0;
+            for (let i = 0; i < tips.length; i++) {
+                const tip = hand[tips[i]];
+                const mcp = hand[mcps[i]];
+                const ratio = Math.hypot(tip.x - wrist.x, tip.y - wrist.y) / Math.hypot(mcp.x - wrist.x, mcp.y - wrist.y);
+                total += ratio;
+                if (ratio > 1.35) open++;
+            }
+            const avg = total / 4;
+            const fist = Math.max(0, Math.min(1, (1.8 - avg) / (1.8 - 1.05)));
+            return { openness: 1 - fist, openFingers: open };
+        }
+
+        function renderVideo() {
+            if (video.readyState >= 2) {
+                vctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+                drawMirroredVideo(vctx, currentMode === 'write' ? 'none' : getFilter());
+
+                if (currentMode === 'write') {
+                    const W = window.innerWidth;
+                    const H = window.innerHeight;
+                    const time = performance.now() * 0.0004;
+                    const breath = (Math.sin(time * 1.8) + 1) / 2;
+
+                    // 1. 整体深色压暗层 — 让摄像头变暗，人影隐约可见
+                    vctx.fillStyle = 'rgba(5, 3, 20, 0.72)';
+                    vctx.fillRect(0, 0, W, H);
+
+                    // 2. 粉紫渐变大光晕 — 从中心向外扩散，带呼吸感
+                    const cx = W * (0.5 + Math.cos(time * 0.5) * 0.04);
+                    const cy = H * (0.45 + Math.sin(time * 0.6) * 0.03);
+                    const mainGlow = vctx.createRadialGradient(cx, cy, W * 0.02, cx, cy, W * (0.55 + breath * 0.12));
+                    mainGlow.addColorStop(0, `rgba(251, 113, 194, ${0.42 + breath * 0.18})`);
+                    mainGlow.addColorStop(0.35, `rgba(192, 80, 235, ${0.32 + breath * 0.14})`);
+                    mainGlow.addColorStop(0.7, `rgba(88, 28, 135, ${0.22 + breath * 0.08})`);
+                    mainGlow.addColorStop(1, 'rgba(5, 3, 20, 0)');
+                    vctx.fillStyle = mainGlow;
+                    vctx.fillRect(0, 0, W, H);
+
+                    // 3. 左上粉色光团
+                    const ax = W * (0.18 + Math.cos(time * 0.7) * 0.06);
+                    const ay = H * (0.25 + Math.sin(time * 0.45) * 0.06);
+                    const gA = vctx.createRadialGradient(ax, ay, 0, ax, ay, W * 0.38);
+                    gA.addColorStop(0, `rgba(244, 114, 182, ${0.35 + breath * 0.2})`);
+                    gA.addColorStop(0.6, `rgba(168, 85, 247, ${0.12 + breath * 0.1})`);
+                    gA.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                    vctx.fillStyle = gA;
+                    vctx.fillRect(0, 0, W, H);
+
+                    // 4. 右下紫色光团
+                    const bx = W * (0.8 + Math.sin(time * 0.55) * 0.05);
+                    const by = H * (0.7 + Math.cos(time * 0.8) * 0.05);
+                    const gB = vctx.createRadialGradient(bx, by, 0, bx, by, W * 0.42);
+                    gB.addColorStop(0, `rgba(139, 92, 246, ${0.30 + breath * 0.15})`);
+                    gB.addColorStop(0.5, `rgba(217, 70, 239, ${0.12 + breath * 0.1})`);
+                    gB.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                    vctx.fillStyle = gB;
+                    vctx.fillRect(0, 0, W, H);
+
+                    // 5. 闪烁星点
+                    for (let i = 0; i < 80; i++) {
+                        const sx = (i * 197 + 33) % W;
+                        const sy = (i * 131 + 17) % H;
+                        const sr = (i % 3) * 0.5 + 0.6;
+                        const twinkle = 0.25 + Math.abs(Math.sin(time * 3.0 + i * 1.7)) * 0.55;
+                        vctx.fillStyle = `rgba(255, 255, 255, ${twinkle})`;
+                        vctx.beginPath();
+                        vctx.arc(sx, sy, sr, 0, Math.PI * 2);
+                        vctx.fill();
+                    }
+                }
+
+                // 惯性：仅在左手不拖动时施加速度衰减
+                if (lastLeftWristX === null && Math.abs(canvasVelocity) > 0.3) {
+                    const maxOffset = -window.innerWidth * (virtualPageCount - 1);
+                    targetCanvasOffsetX = clamp(targetCanvasOffsetX + canvasVelocity, maxOffset, 0);
+                    canvasVelocity *= 0.93; // 摩擦衰减
+                    if (Math.abs(canvasVelocity) <= 0.3) canvasVelocity = 0;
+                    currentPage = Math.min(virtualPageCount, Math.max(1, Math.floor(Math.abs(targetCanvasOffsetX) / window.innerWidth) + 1));
+                }
+                // 平滑过渡
+                canvasOffsetX += (targetCanvasOffsetX - canvasOffsetX) * 0.18;
+                drawCanvas.style.transform = `translateX(${canvasOffsetX}px)`;
+            }
+            requestAnimationFrame(renderVideo);
+        }
+
+        // 模式A: 绘字
+        function updateDrawing(hand) {
+            if (!writingEnabled || currentMode !== 'write') {
+                isDrawing = false;
+                lastPen = null;
+                penState.textContent = currentMode === 'write' ? '关闭' : '--';
+                return;
+            }
+
+            if (!hand) {
+                isDrawing = false;
+                lastPen = null;
+                globalPinchBuffer = [];
+                penState.textContent = '已开启 / 抬起';
+                return;
+            }
+
+            const indexTip = hand[8];
+            const thumbTip = hand[4];
+            
+            // 2D 灵敏捏合检测
+            const dx = indexTip.x - thumbTip.x;
+            const dy = indexTip.y - thumbTip.y;
+            const dist2D = Math.hypot(dx, dy);
+            const rawPinching = dist2D < 0.045; // 稳定好写的阈值
+
+            // 移动缓冲区去抖
+            globalPinchBuffer.push(rawPinching);
+            if (globalPinchBuffer.length > 3) {
+                globalPinchBuffer.shift();
+            }
+            const pinching = globalPinchBuffer.filter(Boolean).length >= 2;
+
+            const pen = pointToScreen(indexTip);
+            // 补偿画布横向滑动偏移量
+            const drawX = pen.x - canvasOffsetX;
+            const drawY = pen.y;
+
+            if (pinching) {
+                penState.textContent = '书写中';
+                if (!isDrawing || !lastPen) {
+                    isDrawing = true;
+                    lastPen = { x: drawX, y: drawY };
+                    return;
+                }
+                dctx.save();
+                dctx.beginPath();
+                dctx.moveTo(lastPen.x, lastPen.y);
+                dctx.lineTo(drawX, drawY);
+                dctx.strokeStyle = inkColor;
+                dctx.lineWidth = 6;
+                dctx.shadowColor = inkShadowColor;
+                dctx.shadowBlur = 8;
+                dctx.stroke();
+                dctx.restore();
+                lastPen = { x: drawX, y: drawY };
+            } else {
+                isDrawing = false;
+                lastPen = null;
+                penState.textContent = '已开启 / 抬起';
+            }
+        }
+
+        // 模式B: 粒子交互
+        function updateNebulaInteraction(hands) {
+            if (currentMode !== 'nebula' || !hands.length) {
+                if (currentMode === 'nebula') {
+                    // 没有手，缓慢静止并复位
+                    targetRotationSpeedY *= 0.95;
+                    targetSphereScale += (1.0 - targetSphereScale) * 0.1;
+                    targetCameraZ += (15 - targetCameraZ) * 0.1;
+                    frameState.textContent = '---';
+                    penState.textContent = '---';
+                }
+                return;
+            }
+
+            const isDoubleHands = hands.length >= 2;
+            const handInfo = hands.map(hand => analyzeOpen(hand));
+            const avgOpenness = handInfo.reduce((sum, item) => sum + item.openness, 0) / hands.length;
+
+            // 1. 缩放控制 (双手/单手张开放大，双手/单手握紧缩小)
+            // 张大增加到 2.2 倍，全握紧减小到 0.45 倍
+            targetSphereScale = 0.45 + avgOpenness * 1.75;
+            frameState.textContent = `${Math.round(avgOpenness * 100)}% 开度`;
+
+            // 2. 双手张开，推进进入球体内部 (Fly-in)
+            // 当检测到两只手，并且它们的平均张开度非常高 (双手张开 > 0.82)
+            if (isDoubleHands && avgOpenness > 0.82) {
+                targetCameraZ = 0.6; // 飞进球中央
+                penState.textContent = '🚀 已进入核心';
+                gestureState.textContent = '🚀 FLY-IN ACTIVE: 进入星云核心';
+            } else {
+                targetCameraZ = 15; // 退回外部
+                penState.textContent = isDoubleHands ? '双手模式' : '单手模式';
+            }
+
+            // 3. 挥手自转控制 (双手指左右挥动控制旋转)
+            // 以第一只手的食指坐标为计算依据
+            const leadHand = hands[0];
+            const wrist = leadHand[0];
+            const nowForGesture = performance.now();
+            const deltaTime = Math.max(16, nowForGesture - lastHandTimestamp);
+
+            let waveVelocity = 0;
+            if (lastHandX !== null) {
+                waveVelocity = (wrist.x - lastHandX) / deltaTime;
+            }
+            lastHandX = wrist.x;
+            lastHandTimestamp = nowForGesture;
+
+            smoothedWaveVelocity += (waveVelocity - smoothedWaveVelocity) * 0.35;
+            const waveDeadZone = 0.00035;
+            const effectiveWave = Math.abs(smoothedWaveVelocity) > waveDeadZone ? smoothedWaveVelocity : 0;
+            
+            // 挥手旋转速度放大
+            const mirroredDirection = -1;
+            targetRotationSpeedY = clamp(effectiveWave * 65 * mirroredDirection, -0.07, 0.07);
+
+            // 若无主动挥手，保持微微自转
+            if (Math.abs(targetRotationSpeedY) < 0.002) {
+                targetRotationSpeedY = 0.002;
+            }
+        }
+
+        // 骨骼层
+        function drawSkeletonHud(hands, poseLandmarks) {
+            hctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+            if (poseLandmarks) {
+                const poseConnections = [
+                    [11,12],[11,13],[13,15],[12,14],[14,16],
+                    [11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],
+                    [27,31],[28,32],
+                    [0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],[9,10]
+                ];
+
+                hctx.save();
+                hctx.lineWidth = 3;
+                hctx.strokeStyle = 'rgba(244,114,182,0.72)';
+                hctx.shadowColor = '#ec4899';
+                hctx.shadowBlur = 10;
+                poseConnections.forEach(([a, b]) => {
+                    const p1 = poseLandmarks[a];
+                    const p2 = poseLandmarks[b];
+                    if (!p1 || !p2 || p1.visibility < 0.35 || p2.visibility < 0.35) return;
+                    const s1 = pointToScreen(p1);
+                    const s2 = pointToScreen(p2);
+                    hctx.beginPath();
+                    hctx.moveTo(s1.x, s1.y);
+                    hctx.lineTo(s2.x, s2.y);
+                    hctx.stroke();
+                });
+
+                poseLandmarks.forEach((lm, i) => {
+                    if (lm.visibility < 0.35) return;
+                    const bodyPts = [11,12,13,14,15,16,23,24,25,26,27,28];
+                    const facePts = [0,1,2,3,4,5,6,7,8,9,10];
+                    if (!bodyPts.includes(i) && !facePts.includes(i)) return;
+                    const p = pointToScreen(lm);
+                    if (facePts.includes(i)) {
+                        hctx.fillStyle = i === 0 ? '#67e8f9' : '#a5f3fc';
+                        hctx.shadowColor = '#22d3ee';
+                        hctx.shadowBlur = 8;
+                        hctx.beginPath();
+                        hctx.arc(p.x, p.y, i === 0 ? 5 : 3, 0, Math.PI * 2);
+                        hctx.fill();
+                    } else {
+                        hctx.shadowColor = '#ec4899';
+                        hctx.shadowBlur = 6;
+                        hctx.fillStyle = i === 11 || i === 12 ? '#f9a8d4' : '#c084fc';
+                        hctx.beginPath();
+                        hctx.arc(p.x, p.y, i === 11 || i === 12 ? 6 : 4, 0, Math.PI * 2);
+                        hctx.fill();
+                    }
+                });
+                hctx.restore();
+            }
+
+            if (!hands.length) return;
+
+            const connections = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
+            hands.forEach(hand => {
+                hctx.save();
+                hctx.strokeStyle = 'rgba(125,211,252,0.6)';
+                hctx.lineWidth = 2;
+                connections.forEach(([a, b]) => {
+                    const p1 = pointToScreen(hand[a]);
+                    const p2 = pointToScreen(hand[b]);
+                    hctx.beginPath();
+                    hctx.moveTo(p1.x, p1.y);
+                    hctx.lineTo(p2.x, p2.y);
+                    hctx.stroke();
+                });
+                hand.forEach((lm, i) => {
+                    const p = pointToScreen(lm);
+                    const special = i === 4 || i === 8;
+                    hctx.fillStyle = special ? '#34d399' : '#38bdf8';
+                    hctx.beginPath();
+                    hctx.arc(p.x, p.y, special ? 5 : 3, 0, Math.PI * 2);
+                    hctx.fill();
+                });
+                hctx.restore();
+            });
+        }
+
+        function clamp(val, min, max) {
+            return Math.max(min, Math.min(max, val));
+        }
+
+        function isPinchingHand(hand) {
+            if (!hand) return false;
+            const indexTip = hand[8];
+            const thumbTip = hand[4];
+            const dist2D = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
+            return dist2D < 0.045;
+        }
+
+        function isFistHand(hand) {
+            if (!hand) return false;
+            return analyzeOpen(hand).openness < 0.26;
+        }
+
+        function getHandRoles(hands, handedness = []) {
+            if (!hands.length) return { leftHand: null, rightHand: null };
+            if (hands.length === 1) {
+                const label = handedness[0]?.label || handedness[0]?.[0]?.label || handedness[0]?.classification?.[0]?.label;
+                if (label === 'Left') return { leftHand: null, rightHand: hands[0] };
+                if (label === 'Right') return { leftHand: hands[0], rightHand: null };
+                return pointToScreen(hands[0][0]).x < window.innerWidth * 0.5
+                    ? { leftHand: hands[0], rightHand: null }
+                    : { leftHand: null, rightHand: hands[0] };
+            }
+
+            let leftHand = null;
+            let rightHand = null;
+            handedness.forEach((info, index) => {
+                const label = info?.label || info?.[0]?.label || info?.classification?.[0]?.label;
+                if (label === 'Left') rightHand = hands[index];
+                if (label === 'Right') leftHand = hands[index];
+            });
+            if (leftHand || rightHand) {
+                return { leftHand, rightHand };
+            }
+
+            const sorted = [...hands].sort((a, b) => pointToScreen(a[0]).x - pointToScreen(b[0]).x);
+            if (sorted.length === 1) {
+                const hand = sorted[0];
+                return pointToScreen(hand[0]).x > window.innerWidth * 0.5
+                    ? { leftHand: null, rightHand: hand }
+                    : { leftHand: hand, rightHand: null };
+            }
+            return { leftHand: sorted[0], rightHand: sorted[sorted.length - 1] };
+        }
+
+        function handleLeftHandControls(leftHand) {
+            if (!leftHand) {
+                lastLeftWristX = null;
+                lastLeftWristTime = null;
+                leftControlWasClosed = false;
+                leftFistTapCount = 0;
+                return;
+            }
+
+            const wrist = pointToScreen(leftHand[0]);
+            const now = performance.now();
+            const leftGestureClosed = isFistHand(leftHand);
+
+            if (leftGestureClosed && !leftControlWasClosed && !colorSwitchCooldown) {
+                if (now - firstLeftFistTime > 1100) {
+                    leftFistTapCount = 0;
+                    firstLeftFistTime = now;
+                }
+
+                leftFistTapCount += 1;
+
+                if (leftFistTapCount >= 2) {
+                    switchInkColor();
+                    leftFistTapCount = 0;
+                    firstLeftFistTime = 0;
+                    colorSwitchCooldown = true;
+                    setTimeout(() => {
+                        colorSwitchCooldown = false;
+                    }, 2000);
+                } else {
+                    swipeAlertText.textContent = '颜色准备切换';
+                    swipePageText.textContent = '请在 1 秒内再握拳一次';
+                    swipeAlert.style.opacity = '1';
+                    swipeAlert.style.transform = 'translate(-50%, -50%) scale(1.02)';
+                    setTimeout(() => {
+                        swipeAlert.style.opacity = '0';
+                        swipeAlert.style.transform = 'translate(-50%, -50%) scale(0.95)';
+                    }, 650);
+                }
+            }
+            leftControlWasClosed = leftGestureClosed;
+
+            if (lastLeftWristX !== null && !leftGestureClosed) {
+                const dx = wrist.x - lastLeftWristX;
+                const dt = Math.max(1, now - lastLeftWristTime);
+                const maxOffset = -window.innerWidth * (virtualPageCount - 1);
+                const dragGain = 1.5;
+                const nextOffset = targetCanvasOffsetX + dx * dragGain;
+                targetCanvasOffsetX = clamp(nextOffset, maxOffset, 0);
+                // 记录速度用于惯性
+                canvasVelocity = (dx * dragGain) / dt * 16; // 归一化到每帧
+                currentPage = Math.min(virtualPageCount, Math.max(1, Math.floor(Math.abs(targetCanvasOffsetX) / window.innerWidth) + 1));
+            }
+
+            lastLeftWristX = wrist.x;
+            lastLeftWristTime = now;
+        }
+
+        // ==========================================
+        // MediaPipe Results Callback
+        // ==========================================
+        function onResults(results) {
+            frameCount++;
+            const now = performance.now();
+            if (now - fpsStart > 1000) {
+                fpsState.textContent = Math.round(frameCount * 1000 / (now - fpsStart));
+                frameCount = 0;
+                fpsStart = now;
+            }
+
+            latestHands = results.multiHandLandmarks || [];
+
+            if (currentMode === 'write') {
+                targetFrame = null;
+                colorFrame = null;
+
+                const { leftHand, rightHand } = getHandRoles(latestHands, results.multiHandedness || []);
+                handleLeftHandControls(leftHand);
+                updateDrawing(rightHand);
+                frameState.textContent = `PAGE 0${currentPage} / ${Math.round(Math.abs(targetCanvasOffsetX))}px`;
+                penState.textContent = rightHand
+                    ? (isPinchingHand(rightHand) ? '右手书写中' : '右手抬笔')
+                    : '等待右手';
+                
+                if (leftHand && rightHand) {
+                    gestureState.textContent = `右手写字 / 左手拖动画布 | 双击握拳换色：${inkPalette[inkColorIndex].name}`;
+                } else if (rightHand) {
+                    gestureState.textContent = `右手写字中 | 当前颜色：${inkPalette[inkColorIndex].name}`;
+                } else if (leftHand) {
+                    gestureState.textContent = `左手控制：拖动画布，连续握拳两次换色 | 当前颜色：${inkPalette[inkColorIndex].name}`;
+                } else {
+                    gestureState.textContent = '等待手势输入';
+                }
+            } else {
+                updateNebulaInteraction(latestHands);
+                
+                if (latestHands.length >= 2) {
+                    gestureState.textContent = '双手检测中：完全张开双手飞进球内部！';
+                } else if (latestHands.length === 1) {
+                    gestureState.textContent = '单手控制：张开/握住调节星云大小';
+                } else {
+                    gestureState.textContent = '等待星云控制手势';
+                }
+            }
+
+            drawSkeletonHud(latestHands, latestPoseLandmarks);
+        }
+
+        function onPoseResults(results) {
+            latestPoseLandmarks = results.poseLandmarks || null;
+        }
+
+        const hands = new Hands({
+            locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 0,
+            minDetectionConfidence: 0.55,
+            minTrackingConfidence: 0.5
+        });
+        hands.onResults(onResults);
+
+        const pose = new Pose({
+            locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+        });
+
+        pose.setOptions({
+            modelComplexity: 0,
+            smoothLandmarks: true,
+            enableSegmentation: false,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        pose.onResults(onPoseResults);
+
+        // ==========================================
+        // Camera Startup
+        // ==========================================
+        async function startCamera() {
+            if (cameraStarted) return;
+            cameraError.textContent = '';
+            overlay.style.display = 'flex';
+
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                cameraError.textContent = '摄像头 API 不可用，请确认使用 localhost / 127.0.0.1 或 HTTPS。';
+                return;
+            }
+
+            try {
+                cameraState.textContent = 'CONNECTING';
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                        facingMode: 'user'
+                    },
+                    audio: false
+                });
+                video.srcObject = stream;
+                await new Promise((resolve) => {
+                    video.onloadedmetadata = resolve;
+                    if (video.readyState >= 1) resolve();
+                });
+                await video.play();
+                cameraStarted = true;
+                cameraState.textContent = 'ACTIVE';
+                overlay.style.display = 'none';
+                
+                // 启动所有系统
+                initThreeJS();
+                resizeAll();
+                renderVideo();
+                animateThreeJS();
+
+                let processingHands = false;
+                let processingPose = false;
+                let lastDetect = 0;
+                let lastPoseDetect = 0;
+                async function detectLoop(ts) {
+                    if (!processingHands && video.readyState >= 2 && ts - lastDetect > 24) {
+                        processingHands = true;
+                        try {
+                            await hands.send({ image: video });
+                            lastDetect = ts;
+                        } catch (err) {
+                            console.error(err);
+                        }
+                        processingHands = false;
+                    }
+
+                    if (!processingPose && video.readyState >= 2 && ts - lastPoseDetect > 70) {
+                        processingPose = true;
+                        try {
+                            await pose.send({ image: video });
+                            lastPoseDetect = ts;
+                        } catch (err) {
+                            console.error(err);
+                        }
+                        processingPose = false;
+                    }
+                    requestAnimationFrame(detectLoop);
+                }
+                requestAnimationFrame(detectLoop);
+            } catch (err) {
+                cameraStarted = false;
+                cameraState.textContent = 'FAILED';
+                cameraError.textContent = `${err.name}: 摄像头启动失败。请检查系统权限，或是否有其他软件占用。`;
+            }
+        }
+
+        startBtn.addEventListener('click', startCamera);
+        overlayStartBtn.addEventListener('click', startCamera);
+        
+        // 自动延时启动尝试
+        setTimeout(startCamera, 500);
+    </script>
+</body>
+</html>

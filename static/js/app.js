@@ -868,6 +868,9 @@ document.querySelectorAll(".nav-item").forEach((button) => {
     if (modePanel) modePanel.classList.add("active-view");
     if (pageTitle) pageTitle.textContent = button.dataset.title || button.textContent.trim();
     document.body.classList.toggle("particle-focus", state.mode === "particles");
+    if (state.mode === "canvas") {
+      stopCamera();
+    }
     if (["web", "media", "particles"].includes(state.mode)) {
       startCamera().then(startRealtimeEngine).catch(() => updateRealtimeStatus("error"));
     }

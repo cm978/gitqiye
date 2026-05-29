@@ -494,8 +494,25 @@ button:hover {
 .gesture-panel strong {
   display: block;
   margin: 18px 0 22px;
-  font-size: clamp(38px, 4vw, 58px);
-  line-height: 1.05;
+  max-width: 100%;
+  font-size: clamp(30px, 3.2vw, 46px);
+  line-height: 1.14;
+  text-wrap: balance;
+}
+
+.gesture-code {
+  display: inline-flex;
+  max-width: 100%;
+  margin: -8px 0 20px;
+  padding: 7px 10px;
+  border: 1px solid rgba(122, 211, 255, 0.18);
+  border-radius: 6px;
+  color: var(--cyan);
+  background: rgba(5, 12, 22, 0.64);
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
 }
 
 .metric-row {
@@ -533,6 +550,10 @@ button:hover {
 .gesture-panel p {
   margin: 18px 0 0;
   line-height: 1.6;
+}
+
+.gesture-panel .gesture-code {
+  margin-top: -8px;
 }
 
 .status-list {
@@ -626,6 +647,28 @@ button:hover {
   border: 1px solid rgba(122, 211, 255, 0.18);
   border-radius: 8px;
   background: #05070b;
+}
+
+.canvas-stage {
+  display: grid;
+  grid-template-rows: auto minmax(520px, 1fr);
+  gap: 18px;
+  min-height: calc(100vh - 152px);
+}
+
+.canvas-toolbar {
+  max-width: none;
+}
+
+.canvas-frame {
+  width: 100%;
+  height: min(72vh, 780px);
+  min-height: 520px;
+  display: block;
+  border: 1px solid rgba(122, 211, 255, 0.20);
+  border-radius: 8px;
+  background: #010206;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
 }
 
 .mode-view {
@@ -972,6 +1015,15 @@ body.particle-focus .particle-presets {
   .longzu-frame {
     height: 66vh;
     min-height: 360px;
+  }
+
+  .canvas-stage {
+    grid-template-rows: auto minmax(420px, 1fr);
+  }
+
+  .canvas-frame {
+    height: 70vh;
+    min-height: 420px;
   }
 
   .player {

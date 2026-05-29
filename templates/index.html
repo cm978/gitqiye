@@ -37,6 +37,9 @@
         <button class="nav-item" data-view="particles" data-mode="particles" data-title="粒子交互">
           <span>粒子</span><em>3D</em>
         </button>
+        <button class="nav-item" data-view="canvas" data-mode="canvas" data-title="画布交互">
+          <span>画布</span><em>Canvas</em>
+        </button>
         <button class="nav-item" data-view="collect" data-mode="web" data-title="自定义数据采集">
           <span>采集</span><em>Data</em>
         </button>
@@ -82,12 +85,12 @@
 
           <section class="gesture-panel surface">
             <span class="eyebrow">Training Model Result</span>
-            <strong id="gestureName">等待识别</strong>
+            <strong id="actionName">训练模型识别结果将在这里显示</strong>
+            <p id="gestureName" class="gesture-code">等待识别</p>
             <div class="metric-row">
               <div><em id="confidence">0%</em><small>置信度</small></div>
               <div><em id="triggerState">待机</em><small>触发状态</small></div>
             </div>
-            <p id="actionName">训练模型识别结果将在这里显示</p>
           </section>
 
           <section class="model-panel surface">
@@ -145,6 +148,25 @@
 
       <section id="particlesView" class="view-panel particle-view-copy">
         <div id="particlesMode" class="mode-view"></div>
+      </section>
+
+      <section id="canvasView" class="view-panel">
+        <div class="module-stage surface canvas-stage">
+          <div class="module-copy canvas-toolbar">
+            <span class="eyebrow">Canvas Interaction</span>
+            <h2>全息手势画布</h2>
+            <p>内嵌 v4 画布终端，在当前系统页面内使用，不会打开新网页。</p>
+          </div>
+          <div id="canvasMode" class="mode-view">
+            <iframe
+              id="canvasFrame"
+              class="canvas-frame"
+              src="/canvas-v4/"
+              title="全息手势画布 v4"
+              allow="camera; microphone; fullscreen"
+            ></iframe>
+          </div>
+        </div>
       </section>
 
       <section id="collectView" class="view-panel">
@@ -206,6 +228,6 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="{{ url_for('static', filename='js/realtime_gestures.js', v='8') }}"></script>
   <script src="{{ url_for('static', filename='js/particles.js', v='38') }}"></script>
-  <script src="{{ url_for('static', filename='js/app.js', v='52') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js', v='53') }}"></script>
 </body>
 </html>
