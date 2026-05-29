@@ -7,7 +7,7 @@ from pathlib import Path
 import torch
 from PIL import Image
 
-from config import DEFAULT_MODEL_PATH, GESTURE_LABELS, GESTURE_TO_ACTIONS, MODEL_CONFIG
+from config import CHECKPOINT_DIR, DEFAULT_CHECKPOINT, DEFAULT_MODEL_PATH, GESTURE_LABELS, GESTURE_TO_ACTIONS, MODEL_CONFIG
 from gesture.dataset import build_transform
 from gesture.model import ResNet50LSTM
 from gesture.preprocess import HandROICropper, PreprocessConfig
@@ -28,6 +28,12 @@ def resolve_checkpoint(path):
             if candidate.exists():
                 return candidate
         raise FileNotFoundError(f"no checkpoint found in directory: {path}")
+    if not path.exists() and path == DEFAULT_CHECKPOINT:
+        candidates = []
+        for name in ("best.pth", "last.pth", "gesture_resnet50_lstm.pth"):
+            candidates.extend(CHECKPOINT_DIR.glob(f"*/{name}"))
+        if candidates:
+            return max(candidates, key=lambda candidate: candidate.stat().st_mtime)
     return path
 
 
@@ -37,10 +43,9 @@ class GesturePredictor:
         self.checkpoint_path = resolve_checkpoint(checkpoint_path)
         self.demo_mode = demo_mode if demo_mode is not None else not self.checkpoint_path.exists()
         self.history = deque(maxlen=MODEL_CONFIG["stable_window"])
-        self.demo_index = 0
         self.labels = GESTURE_LABELS
         self.model_config = dict(MODEL_CONFIG)
-        self.preprocessing = {"roi_mode": "mediapipe"}
+        self.preprocessing = {"roi_mode": "center"}
         self.transform = build_transform(self.model_config["image_size"])
         self.cropper = HandROICropper(PreprocessConfig(roi_mode=self.preprocessing["roi_mode"]))
         self.model = None
@@ -50,7 +55,7 @@ class GesturePredictor:
             self.model_config.update(state.get("config", {}) if isinstance(state, dict) else {})
             self.preprocessing.update(state.get("preprocessing", {}) if isinstance(state, dict) else {})
             self.transform = build_transform(self.model_config["image_size"])
-            self.cropper = HandROICropper(PreprocessConfig(roi_mode=self.preprocessing.get("roi_mode", "mediapipe")))
+            self.cropper = HandROICropper(PreprocessConfig(roi_mode=self.preprocessing.get("roi_mode", "center")))
             self.model = ResNet50LSTM(
                 num_classes=len(self.labels),
                 hidden_size=self.model_config["hidden_size"],

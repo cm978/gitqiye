@@ -1,28 +1,39 @@
 # ResNet50-LSTM 动态手势训练说明
 
-## 当前 Demo 阶段
+## 当前模型阶段
 
-当前项目优先展示“摄像头真实手势控制网页粒子效果”。在没有训练权重时，前端使用 MediaPipe Hands 关键点生成连续手部信号，再由规则层映射为 demo 手势，并通过现有 `/api/predict` 的 `demo_gesture` 字段保持后端返回格式一致。
+当前项目把“训练模型展示”和“实时交互体验”拆成两条链路。训练后的权重已放入 `checkpoints/ipn_resnet50_lstm/`，应用会自动加载目录中的 `best.pth`。“识别”页使用该模型展示训练成果；网页控制、媒体控制和粒子交互使用浏览器端实时手势引擎，以保证速度和体验。
 
-当前 demo 输入对象约定：
+当前模型输入约定：
 
 ```js
 {
-  hasHands: true,
-  hands: 1,
-  center: { x: 0.5, y: 0.5 },
-  openness: 0.0,
-  pinch: 0.0,
-  motion: 0.0
+  frames: ["data:image/jpeg;base64,..."],
+  mode: "web"
 }
 ```
 
-- `center`：控制粒子旋转偏移和上下流动。
-- `openness`：控制粒子扩散、亮度扰动和镜头距离。
-- `pinch`：预留给捏合交互，当前用于增强聚拢效果。
-- `motion`：控制粒子扰动、速度和能量感。
+模型继续输出现有 8 类标签，并保持 `/api/predict` 返回结构兼容。
 
-训练完成后，不需要重写粒子交互层；只需要让真实模型继续输出现有 8 类标签，并保持 `/api/predict` 返回结构兼容。
+## 实时交互说明
+
+实时交互不受当前 8 类训练标签限制。前端通过 `static/js/realtime_gestures.js` 调用 MediaPipe Tasks Gesture Recognizer，输出统一信号：
+
+```js
+{
+  source: "realtime",
+  gesture,
+  confidence,
+  center,
+  velocity,
+  openness,
+  pinch,
+  motion,
+  hands
+}
+```
+
+`app.js` 使用该信号直接驱动网页、媒体和 Three.js 粒子。后端 ResNet50-LSTM 结果保留为训练成果展示和历史记录。
 
 ## 数据目录方式
 
@@ -94,6 +105,7 @@ python app.py
 ```
 
 程序会优先加载目录中的 `best.pth`，找不到时加载 `last.pth`。
+如果没有设置 `GESTURE_MODEL_PATH`，当前项目也会自动发现 `checkpoints/ipn_resnet50_lstm/best.pth`。
 
 ## 说明
 
@@ -112,7 +124,7 @@ python app.py
 模型路线：
 
 ```text
-MediaPipe 手部 ROI 裁剪
+摄像头帧中心裁剪
   ↓
 ResNet-50 CNN 每帧特征
   ↓

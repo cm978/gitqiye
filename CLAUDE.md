@@ -5,9 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Status
 
 This is a gesture recognition + virtual interaction demo. Per the README:
-- Currently only the **particle interaction** mode is implemented and working.
-- The ResNet50-LSTM model pipeline is designed but **no trained weights exist** — the app runs in **demo mode** by default (rule-based, no real inference).
-- The intended full pipeline: MediaPipe hand ROI → ResNet-50 CNN per-frame features → LSTM sequence classification → Flask serving.
+- Trained ResNet50-LSTM weights are available under `checkpoints/ipn_resnet50_lstm/`; the app auto-loads `best.pth` by default.
+- The recognition page uses the trained ResNet50-LSTM as a training-result display.
+- The web/media/particle interaction pages use a browser realtime gesture engine (`static/js/realtime_gestures.js`) built on MediaPipe Tasks Vision for low-latency interaction.
 
 ## Commands
 
@@ -27,7 +27,7 @@ pytest
 pytest tests/test_inference.py
 
 # Run a single test by name
-pytest tests/test_inference.py::test_demo_predictor_defaults_to_no_gesture
+pytest tests/test_inference.py::test_decode_base64_frame_returns_rgb_image
 
 # Train the model (requires collected data in data/custom_samples/)
 python -m gesture.train --data-dir data/custom_samples --epochs 12
@@ -40,22 +40,24 @@ python -m gesture.train --data-dir data/custom_samples --epochs 12
 - `routes/api.py` — REST API at `/api/*`
 
 **API endpoints:**
-- `POST /api/predict` — accepts `{frames: [base64...], mode: "web"|"media"|"particles", demo_gesture?}`, returns gesture label, confidence, action string, and `triggered` boolean
+- `POST /api/predict` — accepts `{frames: [base64...], mode: "web"|"media"|"particles"}`, returns gesture label, confidence, action string, and `triggered` boolean
 - `GET /api/status` — returns model config, labels, gesture→action mappings, and whether demo mode is active
 - `POST /api/collect` — saves labeled frame sequences to `data/custom_samples/` for training
 - `GET /api/sample-counts` — returns per-label sample counts
 
-**`GesturePredictor`** (`gesture/inference.py`) is instantiated once at module load in `routes/api.py`. It auto-detects demo mode when no checkpoint exists at `checkpoints/gesture_resnet50_lstm.pth` (or `GESTURE_MODEL_PATH` env var). In demo mode, it returns a rule-based result using the `demo_gesture` field from the request payload.
+**`GesturePredictor`** (`gesture/inference.py`) is instantiated once at module load in `routes/api.py`. It loads `GESTURE_MODEL_PATH` when set, otherwise `checkpoints/gesture_resnet50_lstm.pth`, otherwise the newest checkpoint directory under `checkpoints/*/best.pth` or `last.pth`. If no checkpoint exists, it falls back to demo mode.
 
 **Model** (`gesture/model.py`): `ResNet50LSTM` — ResNet-50 backbone (feature extractor, fc layer removed) feeds into a single-layer LSTM, then a dropout+linear classifier. Input shape: `(batch, seq_len, 3, 224, 224)`.
 
 **Gesture labels** and **gesture→action mappings** for all three modes (`web`, `media`, `particles`) are defined centrally in `config.py`.
 
-**Frontend** (`static/js/app.js`): Captures webcam frames, buffers them, and POSTs to `/api/predict` on an interval. `static/js/gesture_rules.js` contains client-side rule-based gesture detection (used when `window.GestureRules` is available).
+**Frontend** (`static/js/app.js`): Captures webcam frames, buffers them, and POSTs to `/api/predict` on an interval. Runtime recognition is handled by the backend model.
+
+**Realtime interaction engine** (`static/js/realtime_gestures.js`): Uses `@mediapipe/tasks-vision` Gesture Recognizer in the browser and emits a normalized signal with `gesture`, `confidence`, `center`, `velocity`, `openness`, `pinch`, `motion`, `hands`, and `source: "realtime"`. `app.js` uses this signal to control web, media, and particle modes. The backend model should not be used as the primary realtime interaction driver.
 
 ## Demo Mode vs. Real Model
 
-`GesturePredictor` sets `demo_mode=True` automatically when the checkpoint file doesn't exist. In demo mode, the frontend drives gesture selection via the `demo_gesture` field — the backend just echoes it back with a fixed confidence of 0.96. To use a real model, place a checkpoint at `checkpoints/gesture_resnet50_lstm.pth` (or set `GESTURE_MODEL_PATH`).
+`GesturePredictor` sets `demo_mode=True` only when no checkpoint can be found. To force a specific trained model, set `GESTURE_MODEL_PATH` to either a checkpoint file or a directory containing `best.pth` / `last.pth`.
 
 ## Training Data Collection
 

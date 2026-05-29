@@ -1,11 +1,10 @@
 import math
 
-import numpy as np
 from PIL import Image
 
 
 class PreprocessConfig:
-    def __init__(self, roi_mode="mediapipe", padding=0.32, min_detection_confidence=0.45):
+    def __init__(self, roi_mode="center", padding=0.32, min_detection_confidence=0.45):
         self.roi_mode = roi_mode
         self.padding = padding
         self.min_detection_confidence = min_detection_confidence
@@ -14,60 +13,11 @@ class PreprocessConfig:
 class HandROICropper:
     def __init__(self, config=None):
         self.config = config or PreprocessConfig()
-        self._hands = None
-        self._mediapipe_available = None
 
     def crop(self, image):
         if self.config.roi_mode == "none":
             return image
-        if self.config.roi_mode == "center":
-            return self._center_crop(image)
-        cropped = self._mediapipe_crop(image)
-        return cropped if cropped is not None else self._center_crop(image)
-
-    def _mediapipe_crop(self, image):
-        if not self._ensure_mediapipe():
-            return None
-        width, height = image.size
-        rgb = np.asarray(image.convert("RGB"))
-        result = self._hands.process(rgb)
-        landmarks = result.multi_hand_landmarks or []
-        if not landmarks:
-            return None
-        xs = []
-        ys = []
-        for hand in landmarks:
-            xs.extend(point.x for point in hand.landmark)
-            ys.extend(point.y for point in hand.landmark)
-        left = max(0, min(xs) * width)
-        right = min(width, max(xs) * width)
-        top = max(0, min(ys) * height)
-        bottom = min(height, max(ys) * height)
-        box_w = max(1, right - left)
-        box_h = max(1, bottom - top)
-        side = max(box_w, box_h) * (1 + self.config.padding)
-        cx = (left + right) / 2
-        cy = (top + bottom) / 2
-        return self._crop_square(image, cx, cy, side)
-
-    def _ensure_mediapipe(self):
-        if self._mediapipe_available is False:
-            return False
-        if self._hands is not None:
-            return True
-        try:
-            import mediapipe as mp
-        except ImportError:
-            self._mediapipe_available = False
-            return False
-        self._hands = mp.solutions.hands.Hands(
-            static_image_mode=True,
-            max_num_hands=2,
-            model_complexity=0,
-            min_detection_confidence=self.config.min_detection_confidence,
-        )
-        self._mediapipe_available = True
-        return True
+        return self._center_crop(image)
 
     def _center_crop(self, image):
         width, height = image.size

@@ -1,4 +1,5 @@
 import csv
+import os
 from pathlib import Path
 
 from PIL import Image
@@ -41,7 +42,7 @@ class FrameFolderGestureDataset(Dataset):
         root_dir,
         sequence_length=MODEL_CONFIG["sequence_length"],
         image_size=MODEL_CONFIG["image_size"],
-        roi_mode="mediapipe",
+        roi_mode="center",
         label_map=None,
         labels=None,
     ):
@@ -96,17 +97,20 @@ class ManifestVideoGestureDataset(Dataset):
         annotation_file,
         sequence_length=MODEL_CONFIG["sequence_length"],
         image_size=MODEL_CONFIG["image_size"],
-        roi_mode="mediapipe",
+        roi_mode="center",
         label_map=None,
         labels=None,
     ):
         self.data_dir = Path(data_dir)
         self.annotation_file = Path(annotation_file)
         self.sequence_length = sequence_length
+        self.image_size = image_size
         self.labels = labels or GESTURE_LABELS
         self.label_map = label_map or {}
         self.transform = build_transform(image_size)
         self.cropper = HandROICropper(PreprocessConfig(roi_mode=roi_mode))
+        # Cache VideoCapture objects to avoid repeated open/close overhead
+        self._capture_cache = {}
         self.samples = self._read_manifest()
 
     def __len__(self):
@@ -151,25 +155,49 @@ class ManifestVideoGestureDataset(Dataset):
             import cv2
         except ImportError as exc:
             raise ImportError("opencv-python is required for --dataset-format manifest") from exc
-        capture = cv2.VideoCapture(str(video_path))
-        if not capture.isOpened():
-            raise FileNotFoundError(f"cannot open video: {video_path}")
-        total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        # Use cached capture if available, otherwise open and cache
+        if video_path not in self._capture_cache:
+            cap = cv2.VideoCapture(str(video_path))
+            if not cap.isOpened():
+                raise FileNotFoundError(f"cannot open video: {video_path}")
+            self._capture_cache[video_path] = cap
+        else:
+            cap = self._capture_cache[video_path]
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         if end_frame < 0 or end_frame >= total_frames:
             end_frame = max(start_frame, total_frames - 1)
+
         indices = torch.linspace(start_frame, end_frame, self.sequence_length).long().tolist()
         frames = []
         for frame_index in indices:
-            capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-            ok, frame = capture.read()
+            # Clamp index to valid range
+            if frame_index >= total_frames:
+                frame_index = total_frames - 1
+            if frame_index < 0:
+                frame_index = 0
+
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+            ok, frame = cap.read()
+
+            # Retry once if failed
+            if not ok:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+                ok, frame = cap.read()
+
             if not ok:
                 if frames:
                     frames.append(frames[-1])
-                    continue
-                raise ValueError(f"failed to read frame {frame_index} from {video_path}")
+                else:
+                    # Fallback: create a blank frame to avoid crash
+                    frames.append(Image.new('RGB', (self.image_size, self.image_size), (0, 0, 0)))
+                continue
+
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frames.append(Image.fromarray(rgb))
-        capture.release()
+
+        # Do NOT release cap here; it stays open in cache for next access
         return frames
 
     def _first(self, row, names, default=None):

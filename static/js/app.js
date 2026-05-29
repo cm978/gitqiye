@@ -1,5 +1,6 @@
 ﻿const state = {
   stream: null,
+  view: "recognition",
   mode: "web",
   frames: [],
   labels: [],
@@ -8,18 +9,41 @@
   volume: 50,
   playing: false,
   particleScene: null,
+  realtimeEngine: null,
+  realtimeReady: false,
+  realtimeCooldowns: {},
+  lastStaticGesture: null,
+  lastStaticGestureAt: 0,
   demoMode: true,
-  handSignal: null,
-  gestureRuleState: window.GestureRules ? window.GestureRules.createGestureRuleState() : null,
-  pendingDemoGesture: null,
-  pendingDemoGestureRepeats: 0,
+  sequenceLength: 16,
+  predicting: false,
   demoOverrideUntil: 0,
-  handTracker: null,
-  handTrackingBusy: false,
-  lastHandSignature: null,
-  lastHandCenter: null,
   longzuSectionIndex: 0,
   longzuCharacterIndex: 0,
+  longzuZoom: 1,
+};
+
+const REALTIME_ACTIONS = {
+  open_palm: "zoom_in",
+  fist: "zoom_out",
+  point: "click",
+  confirm: "click",
+  victory: "switch_preset",
+  swipe_left: "swipe_left",
+  swipe_right: "swipe_right",
+  swipe_up: "swipe_up",
+  swipe_down: "swipe_down",
+};
+
+const REALTIME_ACTION_LABELS = {
+  swipe_left: "实时左滑",
+  swipe_right: "实时右滑",
+  swipe_up: "实时上滑",
+  swipe_down: "实时下滑",
+  click: "实时确认",
+  zoom_in: "实时扩散/放大",
+  zoom_out: "实时聚拢/缩小",
+  switch_preset: "切换粒子预设",
 };
 
 const camera = document.getElementById("camera");
@@ -43,6 +67,7 @@ const particleState = document.getElementById("particleState");
 const pageTitle = document.getElementById("pageTitle");
 const longzuFrame = document.getElementById("longzuFrame");
 const longzuGestureHint = document.getElementById("longzuGestureHint");
+const realtimePill = document.getElementById("realtimePill");
 const LONGZU_SECTIONS = ["hero", "characters", "world", "enter"];
 
 async function loadStatus() {
@@ -51,6 +76,7 @@ async function loadStatus() {
   state.labels = status.labels;
   state.mappings = status.mappings;
   state.demoMode = status.demo_mode;
+  state.sequenceLength = status.model_config.sequence_length || 16;
   modelModePill.textContent = status.demo_mode ? "Demo Mode" : "Model Ready";
   devicePill.textContent = status.device.toUpperCase();
   collectLabel.innerHTML = status.labels.map((label) => `<option value="${label}">${label}</option>`).join("");
@@ -74,226 +100,206 @@ function renderMapping() {
 }
 
 async function startCamera() {
-  if (state.stream) return;
-  state.stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  if (state.stream) return state.stream;
+  state.stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      width: { ideal: 640 },
+      height: { ideal: 480 },
+      frameRate: { ideal: 30, max: 30 },
+    },
+    audio: false,
+  });
   camera.srcObject = state.stream;
+  return state.stream;
 }
 
 function stopCamera() {
   if (state.stream) state.stream.getTracks().forEach((track) => track.stop());
   state.stream = null;
   camera.srcObject = null;
+  if (state.realtimeEngine) state.realtimeEngine.stop();
+  state.realtimeReady = false;
+  updateRealtimeStatus("stopped");
 }
 
-function initHandTracking() {
-  if (!window.Hands || state.handTracker) return;
-  state.handTracker = new window.Hands({
-    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
-  });
-  state.handTracker.setOptions({
-    maxNumHands: 2,
-    modelComplexity: 0,
-    minDetectionConfidence: 0.55,
-    minTrackingConfidence: 0.55,
-  });
-  state.handTracker.onResults((results) => {
-    const hands = results.multiHandLandmarks || [];
-    if (!hands.length) {
-      state.handSignal = null;
-      if (state.mode === "particles" && state.particleScene) state.particleScene.updateHands(null);
-      return;
-    }
-    const opennessValues = hands.map(computeHandOpenness);
-    const openness = opennessValues.reduce((sum, value) => sum + value, 0) / opennessValues.length;
-    const center = computeHandsCenter(hands);
-    const pinch = computeHandPinch(hands);
-    const velocity = computeHandVelocity(center);
-    const palm = computePalmSignal(hands);
-    const signature = hands.flatMap((hand) => [hand[0].x, hand[0].y, hand[9].x, hand[9].y]).join(",");
-    const motion = computeHandMotion(signature);
-    state.handSignal = { hasHands: true, hands: hands.length, center, openness, pinch, motion, velocity, palmFacingCamera: palm.facingCamera, palmDirection: palm.direction };
-    if (state.demoMode && window.GestureRules && state.gestureRuleState) {
-      const liveGesture = window.GestureRules.classifyDemoGesture(state.handSignal, state.gestureRuleState);
-      if (liveGesture) queueDemoGesture(liveGesture);
-    }
-    if (state.mode === "particles" && state.particleScene) {
-      state.particleScene.updateHands(state.handSignal);
-    }
-    particleState.textContent = hands.length > 1 ? "双手交互" : "手势交互";
-  });
-  requestAnimationFrame(handTrackingLoop);
-}
-
-function computeHandOpenness(landmarks) {
-  const wrist = landmarks[0];
-  const middleBase = landmarks[9];
-  const palmSize = Math.hypot(wrist.x - middleBase.x, wrist.y - middleBase.y) || 0.08;
-  const tips = [4, 8, 12, 16, 20];
-  const spread = tips.reduce((sum, index) => {
-    const tip = landmarks[index];
-    return sum + Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
-  }, 0) / tips.length;
-  return Math.max(0, Math.min(1, (spread / palmSize - 1.35) / 1.65));
-}
-
-function computeHandMotion(signature) {
-  const values = signature.split(",").map(Number);
-  let motion = 0;
-  if (state.lastHandSignature) {
-    motion = values.reduce((sum, value, index) => sum + Math.abs(value - state.lastHandSignature[index]), 0) / values.length;
+async function startRealtimeEngine() {
+  if (!window.RealtimeGestures) {
+    updateRealtimeStatus("unavailable");
+    return;
   }
-  state.lastHandSignature = values;
-  return Math.max(0, Math.min(1, motion * 18));
-}
-
-function computeHandVelocity(center) {
-  const previous = state.lastHandCenter;
-  state.lastHandCenter = { x: center.x, y: center.y };
-  if (!previous) return { x: 0, y: 0 };
-  return {
-    x: Math.max(-1, Math.min(1, (center.x - previous.x) * 18)),
-    y: Math.max(-1, Math.min(1, (center.y - previous.y) * 18)),
-  };
-}
-
-function computeHandPinch(hands) {
-  const values = hands.map((hand) => {
-    const thumb = hand[4];
-    const index = hand[8];
-    const wrist = hand[0];
-    const middleBase = hand[9];
-    const palmSize = Math.hypot(wrist.x - middleBase.x, wrist.y - middleBase.y) || 0.08;
-    const distance = Math.hypot(thumb.x - index.x, thumb.y - index.y);
-    return Math.max(0, Math.min(1, 1 - distance / (palmSize * 1.45)));
-  });
-  return values.reduce((sum, value) => sum + value, 0) / Math.max(values.length, 1);
-}
-
-function computePalmSignal(hands) {
-  const values = hands.map((hand) => {
-    const wrist = hand[0];
-    const indexBase = hand[5];
-    const middleBase = hand[9];
-    const pinkyBase = hand[17];
-    const palmWidth = Math.hypot(indexBase.x - pinkyBase.x, indexBase.y - pinkyBase.y) || 0.08;
-    const palmHeight = Math.hypot(wrist.x - middleBase.x, wrist.y - middleBase.y) || 0.08;
-    const facingScore = palmWidth / palmHeight;
-    return {
-      facingCamera: facingScore >= 0.68,
-      direction: {
-        x: middleBase.x - wrist.x,
-        y: middleBase.y - wrist.y,
-        z: (middleBase.z || 0) - (wrist.z || 0),
-      },
-    };
-  });
-  const facingCamera = values.some((value) => value.facingCamera);
-  const direction = values.reduce((sum, value) => ({
-    x: sum.x + value.direction.x,
-    y: sum.y + value.direction.y,
-    z: sum.z + value.direction.z,
-  }), { x: 0, y: 0, z: 0 });
-  const count = Math.max(values.length, 1);
-  return {
-    facingCamera,
-    direction: {
-      x: direction.x / count,
-      y: direction.y / count,
-      z: direction.z / count,
-    },
-  };
-}
-
-function computeHandsCenter(hands) {
-  const points = hands.flatMap((hand) => hand);
-  const total = points.reduce((sum, point) => ({
-    x: sum.x + point.x,
-    y: sum.y + point.y,
-  }), { x: 0, y: 0 });
-  return {
-    x: total.x / points.length,
-    y: total.y / points.length,
-  };
-}
-
-async function handTrackingLoop() {
-  if (state.handTracker && state.stream && camera.readyState >= 2 && !state.handTrackingBusy) {
-    state.handTrackingBusy = true;
-    try {
-      await state.handTracker.send({ image: camera });
-    } catch (error) {
-      state.handSignal = null;
-      if (state.particleScene) state.particleScene.updateHands(null);
-    } finally {
-      state.handTrackingBusy = false;
-    }
-  } else if (state.mode === "particles" && state.particleScene) {
-    state.handSignal = null;
-    state.particleScene.updateHands(null);
+  if (!state.realtimeEngine) {
+    state.realtimeEngine = window.RealtimeGestures.createRealtimeGestureEngine({
+      video: camera,
+      onSignal: handleRealtimeSignal,
+      onStatus: ({ status }) => updateRealtimeStatus(status),
+      intervalMs: 100,
+    });
   }
-  requestAnimationFrame(handTrackingLoop);
+  try {
+    await state.realtimeEngine.start();
+  } catch (error) {
+    updateRealtimeStatus("error");
+  }
+}
+
+function updateRealtimeStatus(status) {
+  state.realtimeReady = status === "ready";
+  if (!realtimePill) return;
+  const labels = {
+    loading: "Realtime Loading",
+    ready: "Realtime Ready",
+    error: "Realtime Error",
+    unavailable: "Realtime Off",
+    stopped: "Realtime Stop",
+  };
+  realtimePill.textContent = labels[status] || "Realtime --";
 }
 
 function captureFrame() {
   if (!state.stream || camera.readyState < 2) return null;
-  ctx.drawImage(camera, 0, 0, canvas.width, canvas.height);
+  const sourceWidth = camera.videoWidth || camera.clientWidth || canvas.width;
+  const sourceHeight = camera.videoHeight || camera.clientHeight || canvas.height;
+  const sourceSize = Math.min(sourceWidth, sourceHeight);
+  const sx = Math.round((sourceWidth - sourceSize) / 2);
+  const sy = Math.round((sourceHeight - sourceSize) / 2);
+  ctx.drawImage(camera, sx, sy, sourceSize, sourceSize, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/jpeg", 0.72);
 }
 
-async function predictLoop() {
+function captureLoop() {
   const frame = captureFrame();
   if (frame) {
     state.frames.push(frame);
-    state.frames = state.frames.slice(-16);
-    if (state.frames.length >= 4) await predict();
+    state.frames = state.frames.slice(-state.sequenceLength);
   }
-  setTimeout(predictLoop, 360);
+  setTimeout(captureLoop, 100);
+}
+
+async function predictLoop() {
+  if (state.view !== "recognition" || state.predicting || state.frames.length < state.sequenceLength) {
+    setTimeout(predictLoop, 1500);
+    return;
+  }
+  await predict();
+  setTimeout(predictLoop, 1500);
 }
 
 async function predict() {
-  const demoGesture = state.demoMode ? consumeDemoGesture() : null;
+  state.predicting = true;
   const body = { frames: state.frames, mode: state.mode };
-  if (demoGesture) body.demo_gesture = demoGesture;
-  const response = await fetch("/api/predict", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const result = await response.json();
-  if (result.error) return;
-  if (Date.now() < state.demoOverrideUntil && state.mode === "particles") return;
+  try {
+    const response = await fetch("/api/predict", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const result = await response.json();
+    if (result.error) return;
+    result.source = "model";
+    updateModelResult(result);
+  } finally {
+    state.predicting = false;
+  }
+}
+
+function updateModelResult(result) {
   gestureName.textContent = result.gesture;
   confidence.textContent = `${Math.round(result.confidence * 100)}%`;
   actionName.textContent = result.action;
-  triggerState.textContent = result.triggered ? "已触发" : "识别中";
-  particleConfidence.textContent = `${Math.round(result.confidence * 100)}%`;
-  particleState.textContent = result.triggered ? "已触发" : "待机";
-  fpsPill.textContent = `FPS ${result.fps}`;
+  triggerState.textContent = result.triggered ? "模型已稳定" : "模型识别中";
+  fpsPill.textContent = `Model FPS ${result.fps}`;
   addHistory(result);
+}
+
+function handleRealtimeSignal(signal) {
+  if (!signal) return;
+  updateRealtimeStatus("ready");
   if (state.mode === "particles" && state.particleScene) {
-    state.particleScene.applyGesture(result.gesture, result.confidence, result.triggered);
+    state.particleScene.updateHands(signal);
   }
-  if (result.triggered) applyAction(result.gesture);
+  if (state.view === "recognition") return;
+  const action = mapRealtimeSignal(signal);
+  if (!action || !signal.triggered) return;
+  triggerRealtimeAction(action, signal);
 }
 
-function queueDemoGesture(gesture) {
-  state.pendingDemoGesture = gesture;
-  state.pendingDemoGestureRepeats = 2;
+function mapRealtimeSignal(signal) {
+  if (signal.gesture && signal.gesture.startsWith("swipe_")) {
+    state.lastStaticGesture = null;
+    state.lastStaticGestureAt = 0;
+    return REALTIME_ACTIONS[signal.gesture] || null;
+  }
+  if (!isStaticRealtimeGesture(signal)) return null;
+  return REALTIME_ACTIONS[signal.gesture] || null;
 }
 
-function consumeDemoGesture() {
-  if (!state.pendingDemoGesture || state.pendingDemoGestureRepeats <= 0) return null;
-  const gesture = state.pendingDemoGesture;
-  state.pendingDemoGestureRepeats -= 1;
-  if (state.pendingDemoGestureRepeats <= 0) {
-    state.pendingDemoGesture = null;
+function isStaticRealtimeGesture(signal) {
+  if (!["open_palm", "fist", "point", "confirm", "victory"].includes(signal.gesture)) return false;
+  if (signal.motion > 0.12) return resetStaticGesture();
+  const now = Date.now();
+  if (state.lastStaticGesture !== signal.gesture) {
+    state.lastStaticGesture = signal.gesture;
+    state.lastStaticGestureAt = now;
+    return false;
   }
-  return gesture;
+  const holdMs = ["open_palm", "fist"].includes(signal.gesture) ? 500 : 650;
+  if (Date.now() - state.lastStaticGestureAt < holdMs) return false;
+  return true;
+}
+
+function resetStaticGesture() {
+  state.lastStaticGesture = null;
+  state.lastStaticGestureAt = 0;
+  return false;
+}
+
+function triggerRealtimeAction(action, signal) {
+  if (!canTriggerRealtimeAction(action)) return;
+  const confidenceValue = Math.round((signal.confidence || 0) * 100);
+  gestureName.textContent = signal.gesture || action;
+  confidence.textContent = `${confidenceValue}%`;
+  actionName.textContent = getRealtimeActionLabel(action);
+  triggerState.textContent = "实时触发";
+  particleConfidence.textContent = `${confidenceValue}%`;
+  particleState.textContent = getRealtimeActionLabel(action);
+
+  if (state.mode === "particles") {
+    if (action === "switch_preset") {
+      cycleParticlePreset();
+    } else if (state.particleScene) {
+      state.particleScene.applyGesture(action, signal.confidence || 0, true);
+    }
+  } else if (action === "switch_preset") {
+    applyAction("click");
+  } else {
+    applyAction(action);
+  }
+
+  addHistory({ gesture: action, confidence: signal.confidence || 0, mode: state.mode, action: getRealtimeActionLabel(action), triggered: true, source: "realtime" });
+}
+
+function canTriggerRealtimeAction(action) {
+  const now = Date.now();
+  const cooldown = action === "swipe_up" || action === "swipe_down" ? 520 : 720;
+  if (state.realtimeCooldowns[action] && now - state.realtimeCooldowns[action] < cooldown) return false;
+  state.realtimeCooldowns[action] = now;
+  return true;
+}
+
+function getRealtimeActionLabel(action) {
+  return REALTIME_ACTION_LABELS[action] || action;
+}
+
+function cycleParticlePreset() {
+  const buttons = [...document.querySelectorAll(".preset-btn")];
+  if (!buttons.length) return;
+  const current = Math.max(0, buttons.findIndex((button) => button.classList.contains("active")));
+  buttons[(current + 1) % buttons.length].click();
 }
 
 function addHistory(result) {
   const row = document.createElement("tr");
-  row.innerHTML = `<td>${new Date().toLocaleTimeString()}</td><td>${result.gesture}</td><td>${Math.round(result.confidence * 100)}%</td><td>${result.mode}</td><td>${result.triggered ? result.action : "未触发"}</td>`;
+  row.innerHTML = `<td>${new Date().toLocaleTimeString()}</td><td>${result.source || "model"}</td><td>${result.gesture}</td><td>${Math.round(result.confidence * 100)}%</td><td>${result.mode}</td><td>${result.triggered ? result.action : "未触发"}</td>`;
   historyBody.prepend(row);
   while (historyBody.children.length > 10) historyBody.lastElementChild.remove();
 }
@@ -349,6 +355,14 @@ function applyLongzuAction(gesture) {
   }
   if (gesture === "click") {
     openActiveLongzuCharacter();
+    return;
+  }
+  if (gesture === "zoom_in") {
+    zoomLongzuPage(0.08);
+    return;
+  }
+  if (gesture === "zoom_out") {
+    zoomLongzuPage(-0.08);
   }
 }
 
@@ -449,6 +463,14 @@ function openActiveLongzuCharacter() {
   longzuWindow.scrollBy({ top: Math.round(longzuWindow.innerHeight * 0.72), behavior: "smooth" });
 }
 
+function zoomLongzuPage(delta) {
+  const longzuDocument = getLongzuDocument();
+  if (!longzuDocument || !longzuDocument.body) return;
+  state.longzuZoom = Math.max(0.72, Math.min(1.34, state.longzuZoom + delta));
+  longzuDocument.body.style.zoom = state.longzuZoom;
+  updateLongzuHint(`页面缩放 ${Math.round(state.longzuZoom * 100)}%`);
+}
+
 function wrapIndex(index, length) {
   if (!length) return 0;
   return ((index % length) + length) % length;
@@ -465,6 +487,8 @@ function applyMediaAction(gesture) {
   if (gesture === "swipe_right") current = (current + 1) % tracks.length;
   if (gesture === "swipe_up") state.volume = Math.min(100, state.volume + 10);
   if (gesture === "swipe_down") state.volume = Math.max(0, state.volume - 10);
+  if (gesture === "zoom_in") state.volume = Math.min(100, state.volume + 5);
+  if (gesture === "zoom_out") state.volume = Math.max(0, state.volume - 5);
   if (gesture === "click") state.playing = !state.playing;
   document.getElementById("trackName").textContent = tracks[current];
   document.getElementById("playerState").textContent = state.playing ? "播放中" : "暂停";
@@ -496,7 +520,9 @@ async function refreshCounts() {
   sampleCounts.innerHTML = Object.entries(counts).map(([label, count]) => `<span>${label}: ${count}</span>`).join("");
 }
 
-document.getElementById("startCamera").addEventListener("click", startCamera);
+document.getElementById("startCamera").addEventListener("click", () => {
+  startCamera().then(startRealtimeEngine).catch(() => updateRealtimeStatus("error"));
+});
 document.getElementById("stopCamera").addEventListener("click", stopCamera);
 document.getElementById("collectSample").addEventListener("click", collectSample);
 
@@ -529,6 +555,7 @@ function getParticleDemoState(gesture) {
 document.querySelectorAll(".nav-item").forEach((button) => {
   button.addEventListener("click", () => {
     const view = button.dataset.view;
+    state.view = view;
     state.mode = button.dataset.mode;
     document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("active", item === button));
     document.querySelectorAll(".view-panel").forEach((panel) => panel.classList.remove("active-view-panel"));
@@ -538,8 +565,8 @@ document.querySelectorAll(".nav-item").forEach((button) => {
     if (modePanel) modePanel.classList.add("active-view");
     if (pageTitle) pageTitle.textContent = button.dataset.title || button.textContent.trim();
     document.body.classList.toggle("particle-focus", state.mode === "particles");
-    if (state.mode === "particles") {
-      startCamera().then(initHandTracking).catch(() => {});
+    if (["web", "media", "particles"].includes(state.mode)) {
+      startCamera().then(startRealtimeEngine).catch(() => updateRealtimeStatus("error"));
     }
     renderMapping();
   });
@@ -548,6 +575,7 @@ document.querySelectorAll(".nav-item").forEach((button) => {
 window.addEventListener("load", async () => {
   state.particleScene = window.createParticleScene(document.getElementById("particleCanvas"));
   await loadStatus();
-  startCamera().then(initHandTracking).catch(() => {});
+  startCamera().then(startRealtimeEngine).catch(() => updateRealtimeStatus("error"));
+  captureLoop();
   predictLoop();
 });
