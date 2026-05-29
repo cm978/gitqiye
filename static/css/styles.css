@@ -232,6 +232,100 @@ button:hover {
   font-weight: 900;
 }
 
+.gesture-pointer {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 9;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate3d(-50%, -50%, 0);
+  transition: opacity 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.gesture-pointer::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(66, 232, 255, 0.9);
+  border-radius: 50%;
+  background: rgba(2, 8, 16, 0.42);
+  box-shadow: 0 0 0 7px rgba(66, 232, 255, 0.13), 0 0 24px rgba(66, 232, 255, 0.42);
+}
+
+.gesture-pointer span {
+  position: absolute;
+  left: 24px;
+  top: 50%;
+  min-width: 116px;
+  transform: translateY(-50%);
+  padding: 6px 9px;
+  border: 1px solid rgba(122, 211, 255, 0.28);
+  border-radius: 8px;
+  color: var(--ink);
+  background: rgba(2, 8, 16, 0.76);
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.gesture-pointer[data-active="true"] {
+  opacity: 1;
+}
+
+.gesture-pointer[data-locked="true"]::before {
+  border-color: rgba(255, 209, 102, 0.96);
+  box-shadow: 0 0 0 9px rgba(255, 209, 102, 0.14), 0 0 28px rgba(255, 209, 102, 0.48);
+}
+
+.longzu-finger-ring {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 8;
+  width: 58px;
+  height: 58px;
+  pointer-events: none;
+  opacity: 0;
+  border: 2px solid rgba(66, 232, 255, 0.94);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(66, 232, 255, 0.18) 0 32%, rgba(66, 232, 255, 0.06) 33% 100%);
+  box-shadow:
+    0 0 0 10px rgba(66, 232, 255, 0.08),
+    0 0 36px rgba(66, 232, 255, 0.34),
+    inset 0 0 18px rgba(66, 232, 255, 0.2);
+  transform: translate3d(-999px, -999px, 0) translate(-50%, -50%);
+  transition: opacity 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.longzu-finger-ring::before,
+.longzu-finger-ring::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: rgba(66, 232, 255, 0.9);
+  transform: translate(-50%, -50%);
+}
+
+.longzu-finger-ring::before {
+  width: 20px;
+  height: 2px;
+}
+
+.longzu-finger-ring::after {
+  width: 2px;
+  height: 20px;
+}
+
+.longzu-finger-ring[data-active="true"] {
+  opacity: 1;
+}
+
 .topbar {
   grid-area: top;
   display: flex;
