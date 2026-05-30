@@ -104,6 +104,7 @@ const devicePill = document.getElementById("devicePill");
 const fpsPill = document.getElementById("fpsPill");
 const particleConfidence = document.getElementById("particleConfidence");
 const particleState = document.getElementById("particleState");
+const pageEyebrow = document.getElementById("pageEyebrow");
 const pageTitle = document.getElementById("pageTitle");
 const mediaPlayer = document.getElementById("mediaPlayer");
 const mediaGestureHint = document.getElementById("mediaGestureHint");
@@ -1083,6 +1084,7 @@ document.querySelectorAll(".nav-item").forEach((button) => {
     document.querySelectorAll(".mode-view").forEach((view) => view.classList.remove("active-view"));
     const modePanel = document.getElementById(`${state.mode}Mode`);
     if (modePanel) modePanel.classList.add("active-view");
+    if (pageEyebrow) pageEyebrow.textContent = button.dataset.eyebrow || "";
     if (pageTitle) pageTitle.textContent = button.dataset.title || button.textContent.trim();
     document.body.classList.toggle("particle-focus", state.mode === "particles");
     if (state.mode === "canvas") {
