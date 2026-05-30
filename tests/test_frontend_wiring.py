@@ -78,6 +78,15 @@ def test_realtime_swipe_direction_lock_prevents_bounce_back():
     assert "if (action.startsWith(\"swipe_\") && !canTriggerSwipeAction(action)) return;" in source
 
 
+def test_mapped_realtime_actions_trigger_even_when_raw_engine_does_not():
+    source = APP_JS.read_text(encoding="utf-8-sig")
+    realtime_block = source[source.index("function handleRealtimeSignal"):source.index("function updateGesturePointer")]
+    assert "const action = state.view === \"recognition\" ? null : mapRealtimeSignal(signal);" in realtime_block
+    assert "if (!action) return;" in realtime_block
+    assert "if (!action || !signal.triggered) return;" not in realtime_block
+    assert "triggerRealtimeAction(action, signal);" in realtime_block
+
+
 def test_realtime_signal_exposes_handedness_for_two_finger_controls():
     source = REALTIME_JS.read_text(encoding="utf-8-sig")
     assert "const handedness = getPrimaryHandedness(result);" in source
@@ -213,6 +222,142 @@ def test_realtime_static_click_and_zoom_require_low_motion_hold():
     assert "function resetStaticGesture()" in source
 
 
+def test_media_view_embeds_video_player_and_playlist():
+    html = INDEX_HTML.read_text(encoding="utf-8-sig")
+    source = APP_JS.read_text(encoding="utf-8-sig")
+    assert 'id="mediaPlayer"' in html
+    assert "<video" in html
+    assert "playsinline" in html
+    assert "preload=\"metadata\"" in html
+    assert "const MEDIA_TRACKS = [" in source
+    assert 'src: "/static/media/gesture-video-01.mp4"' in source
+    assert 'src: "/static/media/gesture-video-02.mp4"' in source
+    assert 'src: "/static/media/gesture-video-03.mp4"' in source
+    assert "mediaIndex: 0" in source
+    assert 'const mediaPlayer = document.getElementById("mediaPlayer");' in source
+    assert 'id="mediaGestureHint"' in html
+    assert "两指左右滑动切视频" in html
+    assert 'const mediaGestureHint = document.getElementById("mediaGestureHint");' in source
+
+
+def test_media_actions_control_real_video_player():
+    source = APP_JS.read_text(encoding="utf-8-sig")
+    media_block = source[source.index("function applyMediaAction"):source.index("async function collectSample")]
+    assert "if (gesture === \"swipe_right\") switchMediaTrack(1);" in media_block
+    assert "if (gesture === \"swipe_left\") switchMediaTrack(-1);" in media_block
+    assert "gesture === \"swipe_up\"" not in media_block
+    assert "gesture === \"swipe_down\"" not in media_block
+    assert "if (gesture === \"zoom_in\") state.volume = Math.min(100, state.volume + 10);" in media_block
+    assert "if (gesture === \"zoom_out\") state.volume = Math.max(0, state.volume - 10);" in media_block
+    assert "function switchMediaTrack(direction)" in source
+    assert "state.mediaIndex = wrapIndex(state.mediaIndex + direction, MEDIA_TRACKS.length);" in source
+    assert "function renderMediaTrack(shouldContinuePlaying = state.playing)" in source
+    assert "mediaPlayer.src = track.src;" in source
+    assert "mediaPlayer.play();" in source
+    assert "mediaPlayer.pause();" in source
+    assert "mediaPlayer.volume = state.volume / 100;" in source
+    assert "volumeBar.value = state.volume;" in source
+    assert "renderMediaTrack(false);" in source
+
+
+def test_media_two_finger_swipes_use_stroke_recognizer_not_generic_swipes():
+    source = APP_JS.read_text(encoding="utf-8-sig")
+    assert "mediaTwoFingerStroke: null" in source
+    assert "mediaNeedsRelease: false" in source
+    assert 'mediaTouchState: "idle"' in source
+    assert "mediaTouchHoldMs: 140" in source
+    assert "mediaSlideDetectDistance: 0.02" in source
+    assert "mediaTwoFingerGraceMs: 220" in source
+    assert "mediaTouchCommitDistance" not in source
+    assert "mediaLastStrokeAt" not in source
+    assert "mediaStrokeCooldownMs" not in source
+    assert "mediaStrokeMinDistance: 0.065" in source
+    assert "mediaStrokeDominance: 1.08" in source
+    assert "mediaMirrorHorizontal: true" in source
+    assert "function mapMediaTwoFingerStrokeAction(signal)" in source
+    assert "function resetMediaTwoFingerStroke()" in source
+    assert "function getMediaStrokeDirection(stroke)" in source
+    assert "function updateMediaGestureHint(message)" in source
+    assert "function updateMediaDragPreview(offset, selected = false)" in source
+    assert "function commitMediaDrag(action)" in source
+    assert "媒体页只识别左右滑动" in source
+    assert 'if (state.mode === "media") {' in source[source.index("function mapRealtimeSignal"):source.index("function recordTwoFingerMotion")]
+    assert "handleMediaTwoFingerLost()" in source[source.index("function mapRealtimeSignal"):source.index("function recordTwoFingerMotion")]
+    assert "function handleMediaTwoFingerLost()" in source
+    assert "const mediaAction = mapMediaTwoFingerStrokeAction(signal);" in source
+    assert "return mediaAction;" in source
+    assert 'if (signal.gesture && signal.gesture.startsWith("swipe_")) return null;' in source
+
+
+def test_media_two_finger_lock_then_slide_commits_without_drag_threshold():
+    source = APP_JS.read_text(encoding="utf-8-sig")
+    media_block = source[source.index("function mapMediaTwoFingerStrokeAction"):source.index("function resetMediaTwoFingerStroke")]
+    direction_block = source[source.index("function getMediaStrokeDirection"):source.index("function updateMediaGestureHint")]
+    assert "state.mediaNeedsRelease" in media_block
+    assert 'updateMediaGestureHint("松开两指后可继续");' in media_block
+    assert "return null;" in media_block[media_block.index("if (state.mediaNeedsRelease)"):media_block.index("const point = signal.pointer")]
+    assert "state.mediaTwoFingerStroke = {" in media_block
+    assert 'phase: "holding"' in media_block
+    assert "holdX: point.x" in media_block
+    assert "holdY: point.y" in media_block
+    assert "state.mediaTouchState = \"holding\";" in media_block
+    assert "holdMovement" not in media_block
+    assert 'stroke.phase = "locked";' in media_block
+    assert "state.mediaTouchState = \"locked\";" in media_block
+    assert 'updateMediaGestureHint("已锁定，左右滑动切视频");' in media_block
+    assert "updateMediaDragPreview(0, true);" in media_block
+    assert "if (Math.abs(dx) < state.mediaSlideDetectDistance)" in media_block
+    assert "if (Math.abs(dx) <= Math.abs(dy) * state.mediaStrokeDominance)" in media_block
+    assert "return commitMediaDrag(direction);" in media_block
+    assert "points: [{ x: point.x, y: point.y, at: now }]" in media_block
+    assert "minX: point.x" in media_block
+    assert "maxX: point.x" in media_block
+    assert "minY: point.y" in media_block
+    assert "maxY: point.y" in media_block
+    assert "stroke.minX = Math.min(stroke.minX, point.x);" in media_block
+    assert "stroke.maxX = Math.max(stroke.maxX, point.x);" in media_block
+    assert "state.mediaTouchCommitDistance" not in media_block
+    assert "now - stroke.lastAt > state.mediaTwoFingerGraceMs" in media_block
+    assert "const right = stroke.maxX - stroke.startX;" in direction_block
+    assert "const left = stroke.startX - stroke.minX;" in direction_block
+    assert 'const rightAction = state.mediaMirrorHorizontal ? "swipe_left" : "swipe_right";' in direction_block
+    assert 'const leftAction = state.mediaMirrorHorizontal ? "swipe_right" : "swipe_left";' in direction_block
+    assert "const down = stroke.maxY - stroke.startY;" in direction_block
+    assert "const up = stroke.startY - stroke.minY;" in direction_block
+    assert 'updateMediaGestureHint("媒体页只识别左右滑动");' in direction_block
+    assert "if (horizontal.amount < state.mediaStrokeMinDistance) return null;" in direction_block
+    assert "if (horizontal.amount < vertical.amount * state.mediaStrokeDominance) return null;" in direction_block
+    assert "return horizontal.action;" in direction_block
+    assert 'action: "swipe_down"' not in direction_block
+    assert 'action: "swipe_up"' not in direction_block
+
+
+def test_realtime_engine_runs_faster_for_media_interaction():
+    source = APP_JS.read_text(encoding="utf-8-sig")
+    assert "intervalMs: 60" in source
+
+
+def test_media_lock_slide_commit_animates_once_until_release():
+    source = APP_JS.read_text(encoding="utf-8-sig")
+    css = Path("static/css/styles.css").read_text(encoding="utf-8-sig")
+    preview_block = source[source.index("function updateMediaDragPreview"):source.index("function commitMediaDrag")]
+    commit_block = source[source.index("function commitMediaDrag"):source.index("function updateMediaGestureHint")]
+    assert "mediaPlayer.style.transform = `translate3d(${clamped * 82}%, 0, 0) scale(${selected ? 0.985 : 1})`;" in preview_block
+    assert "mediaPlayer.style.opacity = String(1 - Math.abs(clamped) * 0.28);" in preview_block
+    assert "mediaPlayer.dataset.selected = selected ? \"true\" : \"false\";" in preview_block
+    assert "state.mediaNeedsRelease = true;" in commit_block
+    assert "updateMediaDragPreview(direction === 1 ? 1 : -1, true);" in commit_block
+    assert 'updateMediaGestureHint("已识别，正在切换视频");' in commit_block
+    assert "setTimeout(() => updateMediaDragPreview(0, true), 180);" in commit_block
+    assert "return action;" in commit_block
+    assert "switchMediaTrack(direction);" not in commit_block
+    assert ".media-screen[data-selected=\"true\"]" in css
+    assert ".media-screen video" in css
+    assert "transition: transform 180ms ease, opacity 180ms ease;" in css
+    assert ".media-screen[data-dragging=\"true\"] video" in css
+    assert "transition: none;" in css
+
+
 def test_model_prediction_updates_display_without_triggering_interactions():
     source = APP_JS.read_text(encoding="utf-8-sig")
     predict_block = source[source.index("async function predict()"):source.index("function updateModelResult")]
@@ -244,7 +389,8 @@ def test_particle_scene_uses_hand_center_and_pinch_for_continuous_control():
     source = PARTICLES_JS.read_text(encoding="utf-8-sig")
     assert "const center = handData.center || { x: 0.5, y: 0.5 };" in source
     assert "const velocity = handData.velocity || { x: 0, y: 0 };" in source
-    assert "const pinch = this.clamp(handData.pinch || 0, 0, 1);" in source
+    assert "const openness = this.clamp(handData.openness || 0, 0, 1);" in source
+    assert "const motion = this.clamp(handData.motion || 0, 0, 1);" in source
     assert "this.followTarget.x = (center.x - 0.5) * 52;" in source
     assert "this.followTarget.y = (0.5 - center.y) * 34;" in source
     assert "this.group.position.x += (this.followTarget.x - this.group.position.x) * 0.12;" in source
