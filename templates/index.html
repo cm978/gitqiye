@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>动态手势识别与虚拟交互系统</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css', v='17') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css', v='20') }}">
   <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18">
 </head>
 <body>
@@ -25,25 +25,25 @@
       </a>
 
       <nav class="primary-nav">
-        <button class="nav-item active" data-view="recognition" data-mode="web" data-title="实时识别中心">
+        <button class="nav-item active" data-view="recognition" data-mode="web" data-title="实时识别中心" data-eyebrow="Live Recognition">
           <span>识别</span><em>Live</em>
         </button>
-        <button class="nav-item" data-view="web" data-mode="web" data-title="网页控制">
+        <button class="nav-item" data-view="web" data-mode="web" data-title="龙族网页控制" data-eyebrow="Realtime Web Control">
           <span>网页</span><em>Web</em>
         </button>
-        <button class="nav-item" data-view="media" data-mode="media" data-title="媒体控制">
+        <button class="nav-item" data-view="media" data-mode="media" data-title="媒体控制" data-eyebrow="Realtime Media Control">
           <span>媒体</span><em>Media</em>
         </button>
-        <button class="nav-item" data-view="particles" data-mode="particles" data-title="粒子交互">
+        <button class="nav-item" data-view="particles" data-mode="particles" data-title="粒子交互" data-eyebrow="3D Particle Interaction">
           <span>粒子</span><em>3D</em>
         </button>
-        <button class="nav-item" data-view="canvas" data-mode="canvas" data-title="画布交互">
+        <button class="nav-item" data-view="canvas" data-mode="canvas" data-title="全息画布手势交互" data-eyebrow="Canvas Interaction">
           <span>画布</span><em>Canvas</em>
         </button>
-        <button class="nav-item" data-view="collect" data-mode="web" data-title="自定义数据采集">
+        <button class="nav-item" data-view="collect" data-mode="web" data-title="自定义数据集" data-eyebrow="Data Collection">
           <span>采集</span><em>Data</em>
         </button>
-        <button class="nav-item" data-view="logs" data-mode="web" data-title="识别历史">
+        <button class="nav-item" data-view="logs" data-mode="web" data-title="识别历史" data-eyebrow="Event Log">
           <span>历史</span><em>Log</em>
         </button>
       </nav>
@@ -58,7 +58,7 @@
 
     <header class="topbar">
       <div class="page-heading">
-        <span class="eyebrow">训练模型展示 / 实时交互引擎</span>
+        <span id="pageEyebrow" class="eyebrow">Live Recognition</span>
         <h1 id="pageTitle">实时识别中心</h1>
       </div>
       <div class="top-actions" aria-label="摄像头控制">
@@ -110,9 +110,12 @@
       <section id="webView" class="view-panel">
         <div class="module-stage surface longzu-stage">
           <div class="module-copy longzu-toolbar">
-            <span class="eyebrow">Realtime Web Control</span>
-            <h2>龙族网页控制</h2>
-            <p id="longzuGestureHint">右手两指上滑向下翻页，左手两指上滑向上返回，单指聚焦后确认打开。</p>
+            <div class="gesture-rules">
+              <p>右手两指上滑：向下翻页</p>
+              <p>左手两指上滑：向上返回</p>
+              <p>单指聚焦：确认打开</p>
+            </div>
+            <span id="longzuGestureHint" hidden>右手两指上滑：向下翻页，左手两指上滑：向上返回，单指聚焦：确认打开。</span>
           </div>
           <div id="webMode" class="mode-view active-view">
             <iframe
@@ -156,9 +159,12 @@
       <section id="canvasView" class="view-panel">
         <div class="module-stage surface canvas-stage">
           <div class="module-copy canvas-toolbar">
-            <span class="eyebrow">Canvas Interaction</span>
-            <h2>全息手势画布</h2>
-            <p>内嵌 v4 画布终端，在当前系统页面内使用，不会打开新网页。</p>
+            <div class="gesture-rules canvas-gesture-rules">
+              <p>右手捏合: 凌空书写/抬笔</p>
+              <p>右手握拳两次: 清除画迹</p>
+              <p>左手挥动: 推动画布翻页</p>
+              <p>左手握拳两次: 切换画笔颜色</p>
+            </div>
           </div>
           <div id="canvasMode" class="mode-view">
             <iframe
@@ -175,9 +181,10 @@
       <section id="collectView" class="view-panel">
         <div class="module-stage surface">
           <div class="module-copy">
-            <span class="eyebrow">Data Collection</span>
-            <h2>自定义数据采集</h2>
-            <p>为后续微调动态手势模型保存短序列样本。</p>
+            <div class="gesture-rules">
+              <p>选择类别后录制 2 秒样本</p>
+              <p>保存短序列样本用于后续微调</p>
+            </div>
           </div>
           <div class="collect-controls">
             <select id="collectLabel" aria-label="采集类别"></select>
@@ -191,9 +198,10 @@
       <section id="logsView" class="view-panel">
         <div class="module-stage surface">
           <div class="module-copy">
-            <span class="eyebrow">Event Log</span>
-            <h2>识别历史</h2>
-            <p>最近识别结果会保存在这里，方便观察模型稳定性。</p>
+            <div class="gesture-rules">
+              <p>最近识别结果保存在这里</p>
+              <p>用于观察模型稳定性</p>
+            </div>
           </div>
           <div class="table-wrap">
             <table>
@@ -231,6 +239,6 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="{{ url_for('static', filename='js/realtime_gestures.js', v='8') }}"></script>
   <script src="{{ url_for('static', filename='js/particles.js', v='38') }}"></script>
-  <script src="{{ url_for('static', filename='js/app.js', v='66') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js', v='67') }}"></script>
 </body>
 </html>

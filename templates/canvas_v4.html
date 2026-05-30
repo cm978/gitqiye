@@ -145,7 +145,6 @@
                 </div>
 
                 <div class="space-y-2">
-                    <button id="start-camera-btn" class="w-full px-3 py-2 rounded-lg border border-sky-400/40 bg-sky-950/50 text-sky-100 text-xs hover:bg-sky-900 transition">启动摄像头</button>
                     <button id="write-toggle-btn" class="hidden w-full px-3 py-2 rounded-lg border border-sky-400/30 bg-slate-950/60 text-sky-300 text-xs hover:bg-sky-950/70 transition">开启书写模式</button>
                     <button id="clear-btn" class="w-full px-3 py-2 rounded-lg border border-rose-400/40 bg-rose-950/30 text-rose-200 text-xs hover:bg-rose-900/70 transition">清除画迹</button>
                 </div>
@@ -157,17 +156,7 @@
             </button>
         </div>
 
-        <!-- 右侧手势状态面板 -->
-        <div class="panel corner relative h-fit p-4 rounded-xl text-[11px] text-sky-500 hidden md:block">
-            <div class="text-sky-300 font-bold tracking-widest mb-1.5">[ GESTURE STATS ]</div>
-            <div id="gesture-state" class="text-sky-400 font-bold">等待手势输入</div>
-            <div id="protocol-desc" class="mt-3 text-[10px] text-sky-500/80 leading-relaxed max-w-xs border-t border-sky-900/60 pt-2 space-y-1">
-                <p class="font-bold text-sky-300">超长写字画布协议：</p>
-                <p>右手捏合: 凌空书写/抬笔。</p>
-                <p>左手挥动: 推动画布翻页。</p>
-                <p>左手捏合/握拳: 切换画笔颜色。</p>
-            </div>
-        </div>
+        <div id="gesture-state" hidden>等待手势输入</div>
     </div>
 
     <!-- 启动摄像头覆盖层 -->
@@ -193,7 +182,6 @@
         // UI 元素
         const overlay = document.getElementById('camera-overlay');
         const cameraError = document.getElementById('camera-error');
-        const startBtn = document.getElementById('start-camera-btn');
         const overlayStartBtn = document.getElementById('overlay-start-btn');
         const clearBtn = document.getElementById('clear-btn');
         const writeToggleBtn = document.getElementById('write-toggle-btn');
@@ -204,7 +192,6 @@
         const penState = document.getElementById('pen-state');
         const fpsState = document.getElementById('fps-state');
         const gestureState = document.getElementById('gesture-state');
-        const protocolDesc = document.getElementById('protocol-desc');
         const effectSelectPanel = document.getElementById('effect-select-panel');
 
         // 侧边栏折叠
@@ -242,6 +229,10 @@
         let leftControlWasClosed = false;
         let leftFistTapCount = 0;
         let firstLeftFistTime = 0;
+        let rightControlWasClosed = false;
+        let rightFistTapCount = 0;
+        let firstRightFistTime = 0;
+        let clearDrawingCooldown = false;
 
         // 捏合去抖缓冲区与自适应墨水色彩
         let globalPinchBuffer = [];
@@ -301,6 +292,25 @@
             inkShadowColor = inkPalette[inkColorIndex].shadow;
             triggerColorAlert();
         }
+
+        function clearDrawing(showAlert = false) {
+            dctx.clearRect(0, 0, window.innerWidth * virtualPageCount, window.innerHeight);
+            isDrawing = false;
+            lastPen = null;
+            globalPinchBuffer = [];
+
+            if (!showAlert) return;
+            swipeAlertText.textContent = '画迹已清除';
+            swipePageText.textContent = '右手连续握拳两次触发';
+            swipeAlert.style.borderColor = '#f43f5e';
+            swipeAlert.style.color = '#fecdd3';
+            swipeAlert.style.opacity = '1';
+            swipeAlert.style.transform = 'translate(-50%, -50%) scale(1.05)';
+            setTimeout(() => {
+                swipeAlert.style.opacity = '0';
+                swipeAlert.style.transform = 'translate(-50%, -50%) scale(0.95)';
+            }, 1000);
+        }
         
         let frameCount = 0;
         let fpsStart = performance.now();
@@ -339,7 +349,7 @@
         });
 
         clearBtn.addEventListener('click', () => {
-            dctx.clearRect(0, 0, window.innerWidth * virtualPageCount, window.innerHeight);
+            clearDrawing(false);
         });
 
         writeToggleBtn.addEventListener('click', () => {
@@ -497,6 +507,14 @@
                 lastPen = null;
                 globalPinchBuffer = [];
                 penState.textContent = '已开启 / 抬起';
+                return;
+            }
+
+            if (isFistHand(hand)) {
+                isDrawing = false;
+                lastPen = null;
+                globalPinchBuffer = [];
+                penState.textContent = '右手握拳';
                 return;
             }
 
@@ -733,6 +751,49 @@
             lastLeftWristTime = now;
         }
 
+        function handleRightHandClear(rightHand) {
+            if (!rightHand) {
+                rightControlWasClosed = false;
+                rightFistTapCount = 0;
+                return;
+            }
+
+            const now = performance.now();
+            const rightGestureClosed = isFistHand(rightHand);
+
+            if (rightGestureClosed && !rightControlWasClosed && !clearDrawingCooldown) {
+                if (now - firstRightFistTime > 1100) {
+                    rightFistTapCount = 0;
+                    firstRightFistTime = now;
+                }
+
+                rightFistTapCount += 1;
+
+                if (rightFistTapCount >= 2) {
+                    clearDrawing(true);
+                    rightFistTapCount = 0;
+                    firstRightFistTime = 0;
+                    clearDrawingCooldown = true;
+                    setTimeout(() => {
+                        clearDrawingCooldown = false;
+                    }, 1800);
+                } else {
+                    swipeAlertText.textContent = '清除画迹准备';
+                    swipePageText.textContent = '请在 1 秒内右手再握拳一次';
+                    swipeAlert.style.borderColor = '#f43f5e';
+                    swipeAlert.style.color = '#fecdd3';
+                    swipeAlert.style.opacity = '1';
+                    swipeAlert.style.transform = 'translate(-50%, -50%) scale(1.02)';
+                    setTimeout(() => {
+                        swipeAlert.style.opacity = '0';
+                        swipeAlert.style.transform = 'translate(-50%, -50%) scale(0.95)';
+                    }, 650);
+                }
+            }
+
+            rightControlWasClosed = rightGestureClosed;
+        }
+
         // ==========================================
         // MediaPipe Results Callback
         // ==========================================
@@ -752,6 +813,7 @@
 
                 const { leftHand, rightHand } = getHandRoles(latestHands, results.multiHandedness || []);
                 handleLeftHandControls(leftHand);
+                handleRightHandClear(rightHand);
                 updateDrawing(rightHand);
                 frameState.textContent = `PAGE 0${currentPage} / ${Math.round(Math.abs(targetCanvasOffsetX))}px`;
                 penState.textContent = rightHand
@@ -759,9 +821,9 @@
                     : '等待右手';
                 
                 if (leftHand && rightHand) {
-                    gestureState.textContent = `右手写字 / 左手拖动画布 | 双击握拳换色：${inkPalette[inkColorIndex].name}`;
+                    gestureState.textContent = `右手写字 / 双握拳清除 | 左手拖动画布 / 双握拳换色：${inkPalette[inkColorIndex].name}`;
                 } else if (rightHand) {
-                    gestureState.textContent = `右手写字中 | 当前颜色：${inkPalette[inkColorIndex].name}`;
+                    gestureState.textContent = `右手写字中，双握拳清除画迹 | 当前颜色：${inkPalette[inkColorIndex].name}`;
                 } else if (leftHand) {
                     gestureState.textContent = `左手控制：拖动画布，连续握拳两次换色 | 当前颜色：${inkPalette[inkColorIndex].name}`;
                 } else {
@@ -874,7 +936,6 @@
             }
         }
 
-        startBtn.addEventListener('click', startCamera);
         overlayStartBtn.addEventListener('click', startCamera);
         
         // 自动延时启动尝试
