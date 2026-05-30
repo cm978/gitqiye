@@ -32,13 +32,13 @@ const state = {
   twoFingerStroke: null,
   twoFingerMotionSamples: loadTwoFingerMotionSamples(),
   mediaTwoFingerStroke: null,
-  mediaNeedsRelease: false,
-  mediaTouchState: "idle",
-  mediaTouchHoldMs: 140,
-  mediaSlideDetectDistance: 0.02,
+  mediaReleaseTimer: null,
+  mediaSwipeBlockedUntil: 0,
+  mediaSlideDetectDistance: 0.045,
+  mediaSlideVelocityThreshold: 0.12,
   mediaTwoFingerGraceMs: 220,
   mediaStrokeMinDistance: 0.065,
-  mediaStrokeDominance: 1.08,
+  mediaStrokeDominance: 0.72,
   mediaMirrorHorizontal: true,
   mediaGestureHint: "",
   mediaGestureHintAt: 0,
@@ -406,8 +406,8 @@ function mapWebTwoFingerScrollAction(action, signal) {
 
 function mapMediaTwoFingerStrokeAction(signal) {
   const now = Date.now();
-  if (state.mediaNeedsRelease) {
-    updateMediaGestureHint("松开两指后可继续");
+  if (Date.now() < state.mediaSwipeBlockedUntil) {
+    updateMediaGestureHint("切换完成，可继续滑动");
     return null;
   }
 
@@ -416,11 +416,8 @@ function mapMediaTwoFingerStrokeAction(signal) {
   let stroke = state.mediaTwoFingerStroke;
   if (!stroke || now - stroke.lastAt > state.mediaTwoFingerGraceMs) {
     state.mediaTwoFingerStroke = {
-      phase: "holding",
       startedAt: now,
       lastAt: now,
-      holdX: point.x,
-      holdY: point.y,
       startX: point.x,
       startY: point.y,
       endX: point.x,
@@ -430,11 +427,11 @@ function mapMediaTwoFingerStrokeAction(signal) {
       minY: point.y,
       maxY: point.y,
       maxMotion: 0,
+      lastVelocityX: signal.velocity ? signal.velocity.x || 0 : 0,
       points: [{ x: point.x, y: point.y, at: now }],
     };
-    state.mediaTouchState = "holding";
     updateMediaDragPreview(0, true);
-    updateMediaGestureHint("两指停留选中");
+    updateMediaGestureHint("两指左右滑动切视频");
     return null;
   }
 
@@ -446,54 +443,21 @@ function mapMediaTwoFingerStrokeAction(signal) {
   stroke.minY = Math.min(stroke.minY, point.y);
   stroke.maxY = Math.max(stroke.maxY, point.y);
   stroke.maxMotion = Math.max(stroke.maxMotion, signal.motion || 0);
+  stroke.lastVelocityX = signal.velocity ? signal.velocity.x || 0 : 0;
   stroke.points.push({ x: point.x, y: point.y, at: now });
   stroke.points = stroke.points.slice(-18);
 
-  const age = now - stroke.startedAt;
-  const dx = stroke.endX - stroke.startX;
-  const dy = stroke.endY - stroke.startY;
-
-  if (stroke.phase === "holding") {
-    if (age < state.mediaTouchHoldMs) {
-      updateMediaGestureHint("两指停留选中");
-      return null;
-    }
-    stroke.phase = "locked";
-    stroke.startX = point.x;
-    stroke.startY = point.y;
-    stroke.minX = point.x;
-    stroke.maxX = point.x;
-    stroke.minY = point.y;
-    stroke.maxY = point.y;
-    state.mediaTouchState = "locked";
-    updateMediaDragPreview(0, true);
-    updateMediaGestureHint("已锁定，左右滑动切视频");
-    return null;
-  }
-
-  if (stroke.phase !== "locked") return null;
-  const visualDx = state.mediaMirrorHorizontal ? -dx : dx;
   updateMediaDragPreview(0, true);
-
-  if (Math.abs(dx) < state.mediaSlideDetectDistance) return null;
-  if (Math.abs(dx) <= Math.abs(dy) * state.mediaStrokeDominance) {
-    updateMediaGestureHint("请左右拖动切视频");
-    return null;
-  }
-
-  const direction = visualDx > 0 ? "swipe_right" : "swipe_left";
+  const direction = getMediaStrokeDirection(stroke);
   if (!direction) return null;
   return commitMediaDrag(direction);
 }
 
 function handleMediaTwoFingerLost() {
   const stroke = state.mediaTwoFingerStroke;
-  if (!stroke) {
-    state.mediaNeedsRelease = false;
-    return;
-  }
+  if (!stroke) return;
   if (Date.now() - stroke.lastAt <= state.mediaTwoFingerGraceMs) {
-    updateMediaGestureHint(state.mediaNeedsRelease ? "松开两指后可继续" : "保持锁定中");
+    updateMediaGestureHint("两指左右滑动切视频");
     return;
   }
   resetMediaTwoFingerStroke();
@@ -501,8 +465,6 @@ function handleMediaTwoFingerLost() {
 
 function resetMediaTwoFingerStroke() {
   state.mediaTwoFingerStroke = null;
-  state.mediaTouchState = "idle";
-  state.mediaNeedsRelease = false;
   updateMediaDragPreview(0, false);
 }
 
@@ -526,7 +488,8 @@ function getMediaStrokeDirection(stroke) {
     updateMediaGestureHint("媒体页只识别左右滑动");
     return null;
   }
-  if (horizontal.amount < state.mediaStrokeMinDistance) return null;
+  const velocityX = Math.abs(stroke.lastVelocityX || 0);
+  if (horizontal.amount < state.mediaSlideDetectDistance && velocityX < state.mediaSlideVelocityThreshold) return null;
   if (horizontal.amount < vertical.amount * state.mediaStrokeDominance) return null;
   return horizontal.action;
 }
@@ -547,11 +510,15 @@ function updateMediaDragPreview(offset, selected = false) {
 
 function commitMediaDrag(action) {
   const direction = action === "swipe_right" ? 1 : -1;
-  state.mediaTouchState = "committed";
-  state.mediaNeedsRelease = true;
+  state.mediaSwipeBlockedUntil = Date.now() + 320;
   updateMediaDragPreview(direction === 1 ? 1 : -1, true);
   updateMediaGestureHint("已识别，正在切换视频");
-  setTimeout(() => updateMediaDragPreview(0, true), 180);
+  clearTimeout(state.mediaReleaseTimer);
+  state.mediaReleaseTimer = setTimeout(() => {
+    state.mediaTwoFingerStroke = null;
+    updateMediaDragPreview(0, false);
+    updateMediaGestureHint("切换完成，可继续滑动");
+  }, 260);
   return action;
 }
 
